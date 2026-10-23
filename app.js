@@ -3,7 +3,7 @@
   const $=id=>document.getElementById(id);
   const dz=$('dropzone'), fi=$('fileInput'), queue=$('queue');
   const webpToggle=$('webpToggle'), quality=$('quality'), qualityVal=$('qualityVal');
-  const keepNameEl=$('keepName'), batchToggle=$('batchToggle'), batchBar=$('batchBar');
+  const keepNameEl=$('keepName'), batchBar=$('batchBar');
   const lockScreen=$('lockScreen'), lockbox=$('lockbox'), lockInput=$('lockInput'), lockBtn=$('lockBtn'), lockErr=$('lockErr');
   const mainApp=$('mainApp');
   const lightbox=$('lightbox'), lbMedia=$('lbMedia'), lbMeta=$('lbMeta');
@@ -23,8 +23,7 @@
   const THEME_KEY='yunwo_theme';
   function applyTheme(t){
     document.documentElement.dataset.theme=t;
-    document.querySelectorAll('.themebtn').forEach(b=>b.textContent=(t==='light'?'🌙':'☀️'));
-    const m=$('themeColorMeta'); if(m) m.content=t==='light'?'#f2f4fa':'#0b0d12';
+    const m=$('themeColorMeta'); if(m) m.content=t==='light'?'#f5f6f8':'#0e0f11';
   }
   (function initTheme(){
     let t=localStorage.getItem(THEME_KEY);
@@ -49,16 +48,31 @@
     if(VIDEO_EXTS.includes(ext)) return 'video';
     return 'other';
   }
+  function iconSvg(kind){
+    const paths={
+      file:'<path d="M7 3.5h6.5L19 9v10.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 6 19.5v-14A1.5 1.5 0 0 1 7.5 4H7z"/><path d="M13 3.5V9h6"/>',
+      zip:'<path d="M4 7h16v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7z"/><path d="M4 7 6.5 4h11L20 7"/><path d="M12 10v6M10.5 12.5h3"/>',
+      pdf:'<path d="M7 3.5h6.5L19 9v10.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 6 19.5v-14A1.5 1.5 0 0 1 7.5 4H7z"/><path d="M8.5 16.5c2-2.2 3.2-4.6 3.5-7"/>',
+      doc:'<path d="M7 3.5h6.5L19 9v10.5a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 6 19.5v-14A1.5 1.5 0 0 1 7.5 4H7z"/><path d="M8.5 12.5h7M8.5 16h5"/>',
+      sheet:'<path d="M5 5.5h14v13H5z"/><path d="M5 10h14M5 14h14M10 5.5v13"/>',
+      slide:'<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M12 16v3M8 19h8"/>',
+      audio:'<path d="M9 16.5a2.5 2.5 0 1 1-2-2.45V6.5l10-2v8"/><circle cx="17" cy="13" r="2.2"/>',
+      app:'<rect x="5" y="5" width="6" height="6" rx="1.2"/><rect x="13" y="5" width="6" height="6" rx="1.2"/><rect x="5" y="13" width="6" height="6" rx="1.2"/><rect x="13" y="13" width="6" height="6" rx="1.2"/>',
+      video:'<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M8 5v14M16 5v14M3.5 9.5H8M16 9.5h4.5"/>'
+    };
+    return '<span class="svgico '+kind+'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">'+(paths[kind]||paths.file)+'</svg></span>';
+  }
   function fileIcon(name){
     const ext=(name.split('.').pop()||'').toLowerCase();
-    if(['zip','rar','7z','tar','gz','bz2','xz'].includes(ext)) return '📦';
-    if(ext==='pdf') return '📕';
-    if(['doc','docx','md','txt'].includes(ext)) return '📘';
-    if(['xls','xlsx','csv'].includes(ext)) return '📗';
-    if(['ppt','pptx'].includes(ext)) return '📙';
-    if(['mp3','wav','flac','aac','ogg','m4a'].includes(ext)) return '🎵';
-    if(['exe','apk','dmg','deb','msi'].includes(ext)) return '⚙️';
-    return '📄';
+    if(['zip','rar','7z','tar','gz','bz2','xz'].includes(ext)) return iconSvg('zip');
+    if(ext==='pdf') return iconSvg('pdf');
+    if(['doc','docx','md','txt'].includes(ext)) return iconSvg('doc');
+    if(['xls','xlsx','csv'].includes(ext)) return iconSvg('sheet');
+    if(['ppt','pptx'].includes(ext)) return iconSvg('slide');
+    if(['mp3','wav','flac','aac','ogg','m4a'].includes(ext)) return iconSvg('audio');
+    if(['exe','apk','dmg','deb','msi'].includes(ext)) return iconSvg('app');
+    if(VIDEO_EXTS.includes(ext)) return iconSvg('video');
+    return iconSvg('file');
   }
 
   let maxSizeMB=100;
@@ -122,8 +136,10 @@
   function showPreviewBanner(){
     const b=document.createElement('div');
     b.className='preview-banner';
-    b.textContent='⚠️ 当前为静态预览模式：界面可完整体验，上传与云端文件需部署到 EO / ESA / CF 并配置环境变量后生效';
-    mainApp.insertBefore(b, mainApp.children[1]);
+    b.textContent='当前为静态预览模式：界面可完整体验，上传与云端文件需部署到 EO / ESA / CF 并配置环境变量后生效';
+    const slot=$('bannerSlot');
+    if(slot) slot.replaceChildren(b);
+    else mainApp.insertBefore(b, mainApp.firstChild);
   }
 
   async function tryUnlock(password, fromAuto){
@@ -195,7 +211,12 @@
   let curFmt=localStorage.getItem(FMT_KEY);
   // 灯箱里的格式按钮：点击即选中该格式并完成复制
   const lbFmtRow=$('lbFmtRow');
-  function syncFmtBtns(){ [...lbFmtRow.children].forEach(b=>b.classList.toggle('active', b.dataset.fmt===curFmt)); }
+  function syncFmtBtns(){
+    document.querySelectorAll('.fmt-btn').forEach(b=>b.classList.toggle('active', b.dataset.fmt===curFmt));
+    const label={'url':'链接','md':'Markdown','html':'HTML','bbcode':'BBCode'}[curFmt]||'链接';
+    if($('lbCopy')) $('lbCopy').textContent='复制'+label;
+    if($('insCopy')) $('insCopy').textContent='复制'+label;
+  }
   syncFmtBtns();
   // 按当前格式生成引用文本：图片给嵌入标签，其他类型给普通链接
   function formatLink(f){
@@ -361,6 +382,16 @@
     if(bytes>=1048576) return (bytes/1048576).toFixed(1)+' MB';
     return (bytes/1024).toFixed(0)+' KB';
   }
+  function fmtTime(t){
+    const d=new Date(t);
+    if(Number.isNaN(d.getTime())) return '';
+    const hm=d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
+    const now=new Date();
+    if(d.toDateString()===now.toDateString()) return '今天 '+hm;
+    const yest=new Date(now); yest.setDate(now.getDate()-1);
+    if(d.toDateString()===yest.toDateString()) return '昨天 '+hm;
+    return d.toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'})+' '+hm;
+  }
 
   function handleFiles(files){
     if(!files.length) return;
@@ -384,7 +415,7 @@
     el.className='qitem';
     const thumb=file.type.startsWith('image/')
       ? '<img src="'+URL.createObjectURL(file)+'">'
-      : '<div class="qico">'+(fileTypeOf(file.name)==='video'?'🎬':fileIcon(file.name))+'</div>';
+      : '<div class="qico">'+(fileTypeOf(file.name)==='video'?iconSvg('video'):fileIcon(file.name))+'</div>';
     el.innerHTML=
       thumb+
       '<div class="info"><div class="name">'+escapeHtml(file.name)+'</div>'+
@@ -828,17 +859,20 @@
   let cloudToken='';
   let cloudItems=[];
   let curDir='all';
-  let batchMode=false;        // 批量管理模式开关
+  let batchMode=false;        // 保留给测试钩子；选择本身不再需要单独进入批量模式
   const selected=new Set();   // 已勾选文件的 key 集合
   let dragKeys=null;          // 正在拖拽移动的文件 key 列表
+  let sheetOpen=false;        // 窄屏底部详情是否打开
+  let rowClickTimer=0;
   const TYPE_DIR={image:'img',video:'video',other:'other'};
 
   // 视图切换：平铺 grid / 瀑布流 fall / 列表 list（记住用户选择）
   const VIEW_KEY='yunwo_view';
-  let curView=localStorage.getItem(VIEW_KEY)||'grid';
-  if(!['grid','fall','list'].includes(curView)) curView='grid';
+  let curView=localStorage.getItem(VIEW_KEY)||'list';
+  if(!['grid','fall','list'].includes(curView)) curView='list';
   function applyView(){
     $('cloudList').dataset.view=curView;
+    const pane=$('filePane'); if(pane) pane.dataset.view=curView;
     [...$('viewSwitch').children].forEach(b=>b.classList.toggle('active',b.dataset.view===curView));
   }
   $('viewSwitch').addEventListener('click',e=>{
@@ -851,29 +885,83 @@
   // 排序方式（记住用户选择；对全部 / 图片 / 视频 / 其他 所有标签页生效）
   const SORT_KEY='yunwo_sort';
   let curSort=localStorage.getItem(SORT_KEY)||'time_desc';
+  function fileNameOf(f){ return (f.key||'').split('/').pop()||''; }
   function sortItems(items){
     const arr=[...items];
     if(curSort==='time_asc') arr.sort((a,b)=>new Date(a.time||0)-new Date(b.time||0));
     else if(curSort==='size_desc') arr.sort((a,b)=>(b.size||0)-(a.size||0));
     else if(curSort==='size_asc') arr.sort((a,b)=>(a.size||0)-(b.size||0));
+    else if(curSort==='name_asc') arr.sort((a,b)=>fileNameOf(a).localeCompare(fileNameOf(b),'zh'));
+    else if(curSort==='name_desc') arr.sort((a,b)=>fileNameOf(b).localeCompare(fileNameOf(a),'zh'));
     else arr.sort((a,b)=>new Date(b.time||0)-new Date(a.time||0)); // time_desc 默认：最新在前
     return arr;
   }
+  function markSortHeaders(){
+    const head=$('listHead');
+    if(!head) return;
+    const key=curSort.startsWith('name')?'name':curSort.startsWith('size')?'size':'time';
+    head.dataset.key=key;
+    head.dataset.dir=curSort.endsWith('_asc')?'asc':'desc';
+  }
 
-  // 目录标签页切换
+  function setCrumb(){
+    const el=$('crumb');
+    if(!el) return;
+    const label={all:'全部文件',img:'图片',video:'视频',other:'其他'};
+    if($('shell') && $('shell').classList.contains('show-recent')){
+      el.innerHTML='<span class="crumb-now">本机最近</span>';
+      return;
+    }
+    if(curDir==='all'){
+      el.innerHTML='<span class="crumb-now">全部文件</span>';
+      return;
+    }
+    el.innerHTML='<button type="button" data-dir="all">全部文件</button><span class="crumb-sep">/</span><span class="crumb-now">'+label[curDir]+'</span>';
+  }
+  function showFiles(){
+    const shell=$('shell');
+    if(shell) shell.classList.remove('show-recent','side-open');
+    const r=$('recentTab');
+    if(r){ r.classList.remove('active'); r.removeAttribute('aria-current'); }
+  }
+  // 目录：侧栏四项。从「本机最近」返回同一目录时不重新请求
   $('dirTabs').addEventListener('click',e=>{
     const tab=e.target.closest('.tab');
-    if(!tab || tab.dataset.dir===curDir) return;
-    curDir=tab.dataset.dir;
-    [...$('dirTabs').children].forEach(t=>t.classList.toggle('active',t===tab));
-    loadCloud(false);
+    if(!tab) return;
+    const same=tab.dataset.dir===curDir;
+    showFiles();
+    if(!same) curDir=tab.dataset.dir;
+    [...$('dirTabs').children].forEach(t=>{
+      const on=t===tab;
+      t.classList.toggle('active',on);
+      if(on) t.setAttribute('aria-current','page'); else t.removeAttribute('aria-current');
+    });
+    setCrumb();
+    if(!same) loadCloud(false);
   });
+  $('crumb').addEventListener('click',e=>{
+    const b=e.target.closest('button[data-dir]');
+    if(!b) return;
+    const tab=[...$('dirTabs').children].find(t=>t.dataset.dir===b.dataset.dir);
+    if(tab) tab.click();
+  });
+  $('recentTab').addEventListener('click',()=>{
+    $('shell').classList.add('show-recent');
+    $('shell').classList.remove('side-open','sheet');
+    sheetOpen=false;
+    $('recentTab').classList.add('active');
+    $('recentTab').setAttribute('aria-current','page');
+    [...$('dirTabs').children].forEach(t=>{ t.classList.remove('active'); t.removeAttribute('aria-current'); });
+    setCrumb();
+    updateBatchBar();
+  });
+  setCrumb();
 
   function gridTile(f){
     const t=f.type||fileTypeOf(f.key);
     const u=escapeHtml(f.url); // 属性上下文必须转义，防 key 中特殊字符造成属性注入
     if(t==='image') return '<img loading="lazy" src="'+u+'" alt="">';
-    if(t==='video') return '<video muted preload="metadata" src="'+u+'"></video><div class="badge">🎬 视频</div>';
+    if(t==='video') return '<video muted preload="metadata" src="'+u+'"></video><div class="badge">视频</div>';
     return '<div class="ftile"><div class="fico">'+fileIcon(f.key)+'</div><div class="fext">'+escapeHtml((f.key.split('.').pop()||'file').slice(0,6))+'</div></div>';
   }
 
@@ -884,34 +972,63 @@
     const base=kw? cloudItems.filter(f=>f.key.toLowerCase().includes(kw)) : cloudItems;
     const items=sortItems(base);
     viewItems=items; // 灯箱左右切换的导航范围（与当前筛选/排序一致）
-    $('cloudCount').textContent=kw? `（筛选出 ${items.length} / 共 ${cloudItems.length}）` : (cloudItems.length?`（${cloudItems.length}）`:'');
+    $('cloudCount').textContent=kw? `筛选出 ${items.length} / 共 ${cloudItems.length}` : `${cloudItems.length} 个文件`;
     if(!items.length){
-      list.innerHTML='<div class="empty" style="grid-column:1/-1">'+(kw?'没有匹配的文件':'这个目录还是空的，传一个试试 ↑')+'</div>';
+      list.innerHTML='<div class="empty">'+(kw?'没有匹配的文件':'这个文件夹是空的')+'</div>';
+      updateBatchBar();
       return;
     }
-    items.forEach((f,i)=>{
+    items.forEach((f)=>{
       const d=document.createElement('div');
-      d.className='gitem'; d.style.animationDelay=(Math.min(i,12)*0.03)+'s';
+      d.className='gitem';
+      d.dataset.key=f.key;
       const nm=f.key.split('/').pop();
       const sub=(f.size?fmtSize(f.size):'')+(f.size&&f.time?' · ':'')+(f.time?new Date(f.time).toLocaleDateString():'');
-      d.innerHTML=gridTile(f)+'<div class="selbox">✓</div>'
+      d.innerHTML=gridTile(f)+'<button type="button" class="selbox" aria-label="选择"></button>'
         +'<div class="ginfo"><div class="gname">'+escapeHtml(nm)+'</div><div class="gsub">'+escapeHtml(sub)+'</div></div>'
-        +'<div class="lmeta"><span class="lname">'+escapeHtml(nm)+'</span>'
-        +'<span class="linfo">'+(f.size?fmtSize(f.size):'')+(f.size&&f.time?' · ':'')+(f.time?new Date(f.time).toLocaleString():'')+'</span></div>';
+        +'<div class="lmeta"><span class="lname">'+escapeHtml(nm)+'</span></div>'
+        +'<div class="lsize">'+(f.size?fmtSize(f.size):'—')+'</div>'
+        +'<div class="ltime">'+(f.time?fmtTime(f.time):'—')+'</div>'
+        +'<button type="button" class="rowmore" aria-label="更多"></button>';
       if(selected.has(f.key)) d.classList.add('sel');
-      d.addEventListener('click',()=>{
-        if(batchMode){
-          if(selected.has(f.key)){ selected.delete(f.key); d.classList.remove('sel'); }
-          else{ selected.add(f.key); d.classList.add('sel'); }
-          updateBatchBar();
+      const toggle=()=>{
+        if(selected.has(f.key)) selected.delete(f.key); else selected.add(f.key);
+        sheetOpen=false;
+        updateBatchBar();
+      };
+      d.querySelector('.selbox').addEventListener('click',e=>{ e.stopPropagation(); clearTimeout(rowClickTimer); toggle(); });
+      d.querySelector('.rowmore').addEventListener('click',e=>{
+        e.stopPropagation();
+        clearTimeout(rowClickTimer);
+        openCtx(0, 0, f, e.currentTarget);
+      });
+      d.addEventListener('click',e=>{
+        if(e.target.closest('.selbox')||e.target.closest('.rowmore')) return;
+        if(window.matchMedia('(pointer:coarse)').matches){
+          clearTimeout(rowClickTimer);
+          selected.clear(); selected.add(f.key); sheetOpen=true; updateBatchBar();
           return;
         }
-        openLightbox(f);
+        if(e.detail>1) return;
+        clearTimeout(rowClickTimer);
+        rowClickTimer=setTimeout(toggle, 220);
+      });
+      d.addEventListener('dblclick',e=>{
+        if(e.target.closest('.selbox')||e.target.closest('.rowmore')) return;
+        clearTimeout(rowClickTimer);
+        if(!selected.has(f.key)){ selected.clear(); selected.add(f.key); }
+        sheetOpen=false;
+        updateBatchBar();
+        openItem(f);
+      });
+      d.addEventListener('contextmenu',e=>{
+        e.preventDefault();
+        openCtx(e.clientX, e.clientY, f);
       });
       // 拖拽移动：拖到上方目录标签即移动到对应目录（批量模式下拖动已选中的文件会带走整组）
       d.draggable=true;
       d.addEventListener('dragstart',e=>{
-        dragKeys=(batchMode&&selected.has(f.key))? [...selected] : [f.key];
+        dragKeys=(selected.has(f.key)? [...selected] : [f.key]);
         e.dataTransfer.setData('text/plain', f.key);
         e.dataTransfer.effectAllowed='move';
         d.classList.add('dragging');
@@ -922,36 +1039,50 @@
       });
       list.appendChild(d);
     });
+    updateBatchBar();
   }
 
   // ================= 批量操作（多选 / 批量复制 / 批量删除） =================
   function updateBatchBar(){
-    $('batchCount').textContent='已选 '+selected.size+' 项';
+    const n=selected.size;
+    $('batchCount').textContent='已选 '+n+' 项';
+    batchBar.classList.toggle('show', n>0);
+    const shell=$('shell');
+    if(shell) shell.classList.toggle('selecting', n>0);
+    if(n===0){
+      const del=$('batchDelete');
+      if(del){ del.dataset.armed=''; del.textContent='删除'; }
+    }
+    const one=n===1 ? (viewItems.find(f=>selected.has(f.key))||null) : null;
+    if(shell){
+      shell.classList.toggle('has-one', !!one && !shell.classList.contains('show-recent'));
+      shell.classList.toggle('sheet', !!(one && sheetOpen) && !shell.classList.contains('show-recent'));
+    }
+    if(one) renderInspector(one);
+    document.querySelectorAll('#cloudList .gitem').forEach(el=>{
+      el.classList.toggle('sel', selected.has(el.dataset.key));
+    });
+    const lc=$('listCheck');
+    if(lc) lc.classList.toggle('on', viewItems.length>0 && viewItems.every(f=>selected.has(f.key)));
   }
   function setBatch(on){
     batchMode=on;
-    $('cloudList').classList.toggle('batch',on);
-    batchToggle.classList.toggle('active',on);
-    batchBar.classList.toggle('show',on);
-    if(!on) selected.clear();
+    $('cloudList').classList.add('batch');
+    if(!on){ selected.clear(); sheetOpen=false; }
     updateBatchBar();
     renderCloud($('cloudSearch').value);
   }
-  batchToggle.addEventListener('click',()=>setBatch(!batchMode));
   $('batchCancel').addEventListener('click',()=>setBatch(false));
   $('batchAll').addEventListener('click',()=>{
-    const kw=($('cloudSearch').value||'').toLowerCase();
-    cloudItems.forEach(f=>{ if(!kw || f.key.toLowerCase().includes(kw)) selected.add(f.key); });
-    updateBatchBar(); renderCloud($('cloudSearch').value);
+    viewItems.forEach(f=>selected.add(f.key));
+    renderCloud($('cloudSearch').value);
   });
   // 反选：当前筛选范围内，已选的取消、未选的选中
   $('batchInvert').addEventListener('click',()=>{
-    const kw=($('cloudSearch').value||'').toLowerCase();
-    cloudItems.forEach(f=>{
-      if(kw && !f.key.toLowerCase().includes(kw)) return;
+    viewItems.forEach(f=>{
       if(selected.has(f.key)) selected.delete(f.key); else selected.add(f.key);
     });
-    updateBatchBar(); renderCloud($('cloudSearch').value);
+    renderCloud($('cloudSearch').value);
   });
   $('batchCopy').addEventListener('click',()=>{
     if(!selected.size){ toast('请先勾选文件'); return; }
@@ -1046,7 +1177,9 @@
     if(!append){
       list.innerHTML=Array.from({length:8},()=>'<div class="skel"></div>').join('');
       cloudItems=[]; cloudToken='';
-      selected.clear(); updateBatchBar(); // 目录切换/刷新后旧选择已失效
+      selected.clear(); sheetOpen=false;
+      $('cloudCount').textContent='';
+      updateBatchBar(); // 目录切换/刷新后旧选择已失效
     }
     try{
       const r=await fetch('/api/list',{
@@ -1069,6 +1202,7 @@
     }catch(e){
       list.innerHTML='';
       hint.style.display='block';
+      $('cloudCount').textContent='';
       const offline=/failed to fetch|networkerror|load failed/i.test(e.message||'');
       hint.textContent=offline?'静态预览模式：云端文件需部署后使用':'加载失败：'+e.message;
     }
@@ -1078,11 +1212,15 @@
   $('cloudMore').addEventListener('click',()=>loadCloud(true));
   $('cloudSearch').addEventListener('input',e=>renderCloud(e.target.value));
   const sortSel=$('cloudSort');
-  sortSel.value=['time_desc','time_asc','size_desc','size_asc'].includes(curSort)?curSort:'time_desc';
+  const SORTS=['time_desc','time_asc','size_desc','size_asc','name_asc','name_desc'];
+  sortSel.value=SORTS.includes(curSort)?curSort:'time_desc';
+  if(sortSel.value!==curSort) curSort=sortSel.value;
   sortSel.addEventListener('change',()=>{
     curSort=sortSel.value; localStorage.setItem(SORT_KEY,curSort);
+    markSortHeaders();
     renderCloud($('cloudSearch').value);
   });
+  markSortHeaders();
   applyView();
 
   // ================= 灯箱 =================
@@ -1130,12 +1268,40 @@
   $('lbPrev').addEventListener('click',()=>lbNav(-1));
   $('lbNext').addEventListener('click',()=>lbNav(1));
   window.addEventListener('keydown',e=>{
-    if(e.key==='Escape'){ closeQr(); closeLightbox(); return; }
-    // ←/→ 切换上下个：仅灯箱打开且不在重命名输入、二维码弹窗未遮挡时生效
-    if(!lightbox.classList.contains('show') || qrModal.classList.contains('show')) return;
-    if(lbRenameRow.style.display!=='none') return;
-    if(e.key==='ArrowLeft') lbNav(-1);
-    else if(e.key==='ArrowRight') lbNav(1);
+    const typing=document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+    if(e.key==='Escape'){
+      closeCtx();
+      const menu=$('uploadMenu'); if(menu) menu.classList.remove('show');
+      if(qrModal.classList.contains('show')){ closeQr(); return; }
+      if(nameModal.classList.contains('show')) return;
+      if(lightbox.classList.contains('show')){ closeLightbox(); return; }
+      if(typing) return;
+      selected.clear(); sheetOpen=false;
+      const shell=$('shell'); if(shell) shell.classList.remove('side-open','sheet');
+      updateBatchBar();
+      return;
+    }
+    if(typing) return;
+    if(qrModal.classList.contains('show') || nameModal.classList.contains('show')) return;
+    if(lightbox.classList.contains('show')){
+      if(e.key==='Delete' && lbCurrent){ $('lbDelete').click(); return; }
+      if(lbRenameRow.style.display!=='none') return;
+      if(e.key==='ArrowLeft') lbNav(-1);
+      else if(e.key==='ArrowRight') lbNav(1);
+      return;
+    }
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='a' && !$('shell').classList.contains('show-recent')){
+      e.preventDefault();
+      viewItems.forEach(f=>selected.add(f.key));
+      sheetOpen=false;
+      updateBatchBar();
+      return;
+    }
+    if(e.key==='Delete' && selected.size){ $('batchDelete').click(); return; }
+    if(e.key==='Enter' && selected.size===1 && !$('shell').classList.contains('show-recent')){
+      const f=cloudItems.find(x=>selected.has(x.key));
+      if(f) openItem(f);
+    }
   });
   $('lbCopy').addEventListener('click',()=>{ if(lbCurrent) copyText(formatLink(lbCurrent), FMT_LABEL[curFmt]); });
   // 格式按钮：选中格式、记住选择，并立即按该格式复制当前文件
@@ -1202,6 +1368,7 @@
       // 更新内存中的条目与灯箱显示（新 key / 新直链）
       const it=cloudItems.find(x=>x.key===oldKey);
       if(it){ it.key=data.key; it.url=data.url; }
+      if(selected.has(oldKey)){ selected.delete(oldKey); selected.add(data.key); }
       lbCurrent.key=data.key; lbCurrent.url=data.url;
       closeRename();
       renderCloud($('cloudSearch').value);
@@ -1251,6 +1418,7 @@
       const data=await r.json().catch(()=>({}));
       if(r.status===401){ authExpired(); throw new Error('登录已过期，请重新输入密码'); }
       if(!r.ok) throw new Error(data.error||('删除失败 '+r.status));
+      selected.delete(lbCurrent.key);
       cloudItems=cloudItems.filter(x=>x.key!==lbCurrent.key);
       renderCloud($('cloudSearch').value);
       closeLightbox();
@@ -1270,15 +1438,15 @@
     renderHist();
   }
   function renderHist(){
-    const h=getHist(), card=$('historyCard'), list=$('historyList');
-    if(!h.length){ card.style.display='none'; return; }
-    card.style.display='block'; list.innerHTML='';
+    const h=getHist(), list=$('historyList');
+    if(!h.length){ list.innerHTML='<div class="empty">这台浏览器还没有上传记录</div>'; return; }
+    list.innerHTML='';
     h.forEach(it=>{
       const d=document.createElement('div');
       d.className='gitem';
       const t=fileTypeOf(it.url.split('?')[0]);
       if(t==='image') d.innerHTML='<img loading="lazy" src="'+escapeHtml(it.url)+'">';
-      else if(t==='video') d.innerHTML='<div class="ftile"><div class="fico">🎬</div><div class="fext">video</div></div>';
+      else if(t==='video') d.innerHTML='<div class="ftile"><div class="fico">'+iconSvg('video')+'</div><div class="fext">video</div></div>';
       else d.innerHTML='<div class="ftile"><div class="fico">'+fileIcon(it.url)+'</div><div class="fext">'+escapeHtml((it.url.split('.').pop()||'file').slice(0,6))+'</div></div>';
       d.innerHTML+='<div class="mask"><span>点击复制链接</span></div>';
       d.addEventListener('click',()=>copyText(formatLink({url:it.url, key:it.url.split('?')[0].split('/').map(decodeURIComponent).join('/'), type:t}), FMT_LABEL[curFmt]));
@@ -1287,6 +1455,173 @@
   }
   $('clearHist').addEventListener('click',()=>{ localStorage.removeItem(HIST_KEY); renderHist(); toast('历史已清空'); });
   renderHist();
+
+  // ================= 网盘交互：打开 / 检查器 / 右键 =================
+  function selectedOne(){
+    if(selected.size!==1) return null;
+    return cloudItems.find(f=>selected.has(f.key))||null;
+  }
+  function openItem(f){
+    const t=f.type||fileTypeOf(f.key);
+    if(t==='image'||t==='video'){ openLightbox(f); return; }
+    const a=document.createElement('a');
+    a.href=f.url; a.target='_blank'; a.rel='noopener noreferrer';
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+  function renderInspector(f){
+    const t=f.type||fileTypeOf(f.key);
+    const name=f.key.split('/').pop();
+    $('insName').textContent=name;
+    $('insSize').textContent=f.size?fmtSize(f.size):'—';
+    $('insType').textContent=t==='image'?'图片':t==='video'?'视频':'文件';
+    $('insTime').textContent=f.time?fmtTime(f.time):'—';
+    $('insWhere').textContent=({img:'图片',video:'视频',other:'其他'}[f.key.split('/')[1]]||'文件');
+    $('insPath').textContent=f.key;
+    $('insPreview').innerHTML=t==='image'
+      ? '<img alt="" src="'+escapeHtml(f.url)+'">'
+      : '<div class="ins-file">'+fileIcon(f.key)+'</div>';
+    $('insOpen').textContent=(t==='image'||t==='video')?'打开':'新标签打开';
+    $('insRenameRow').hidden=true;
+    document.querySelectorAll('#inspector .ins-move [data-dir]').forEach(b=>{
+      b.disabled=b.dataset.dir===f.key.split('/')[1];
+    });
+    syncFmtBtns();
+  }
+  let ctxFile=null;
+  function closeCtx(){
+    const m=$('ctxMenu');
+    if(m) m.classList.remove('show');
+    ctxFile=null;
+  }
+  function openCtx(x,y,f,anchor){
+    clearTimeout(rowClickTimer);
+    ctxFile=f;
+    if(!selected.has(f.key)){
+      selected.clear(); selected.add(f.key); sheetOpen=false;
+    }
+    updateBatchBar(); // 检查器出现后行宽会变，锚点要在重排后再量
+    if(anchor && anchor.getBoundingClientRect){
+      const r=anchor.getBoundingClientRect();
+      x=r.left; y=r.bottom+4;
+    }
+    const menu=$('ctxMenu');
+    const multi=selected.size>1 && selected.has(f.key);
+    menu.querySelectorAll('[data-single]').forEach(el=>{ el.hidden=multi; });
+    const keys=selected.has(f.key)? [...selected] : [f.key];
+    menu.querySelectorAll('[data-act="move"]').forEach(b=>{
+      b.disabled=keys.every(k=>k.split('/')[1]===b.dataset.dir);
+    });
+    menu.classList.add('show');
+    menu.style.left='0px'; menu.style.top='0px';
+    const w=menu.offsetWidth, h=menu.offsetHeight;
+    let left=x, top=y;
+    if(left+w>window.innerWidth-8) left=Math.max(8, (anchor?x+anchor.offsetWidth:x)-w);
+    if(left<8) left=8;
+    if(top+h>window.innerHeight-8) top=Math.max(8, y-h-8);
+    menu.style.left=left+'px';
+    menu.style.top=top+'px';
+  }
+  $('uploadBtn').addEventListener('click',()=>$('fileInput').click());
+  $('setBtn').addEventListener('click',e=>{
+    e.stopPropagation();
+    const open=$('uploadMenu').classList.toggle('show');
+    $('setBtn').setAttribute('aria-expanded', open?'true':'false');
+  });
+  $('navBtn').addEventListener('click',()=>$('shell').classList.toggle('side-open'));
+  $('sideMask').addEventListener('click',()=>$('shell').classList.remove('side-open'));
+  document.addEventListener('click',e=>{
+    if(!e.target.closest('.upload-group')){
+      $('uploadMenu').classList.remove('show');
+      $('setBtn').setAttribute('aria-expanded','false');
+    }
+  });
+  document.addEventListener('pointerdown',e=>{
+    if(!e.target.closest('#ctxMenu')) closeCtx();
+  });
+  document.querySelector('.stage').addEventListener('scroll',()=>closeCtx(),{passive:true});
+  $('cloudList').addEventListener('click',e=>{
+    if(e.target.id!=='cloudList' && !e.target.classList.contains('empty')) return;
+    selected.clear(); sheetOpen=false; updateBatchBar();
+  });
+  $('listCheck').addEventListener('click',()=>{
+    const all=viewItems.length && viewItems.every(f=>selected.has(f.key));
+    if(all) viewItems.forEach(f=>selected.delete(f.key));
+    else viewItems.forEach(f=>selected.add(f.key));
+    sheetOpen=false;
+    renderCloud($('cloudSearch').value);
+  });
+  $('listHead').addEventListener('click',e=>{
+    const b=e.target.closest('[data-sort]');
+    if(!b) return;
+    const k=b.dataset.sort;
+    let next;
+    if(k==='name') next=curSort==='name_asc'?'name_desc':'name_asc';
+    else if(k==='size') next=curSort==='size_desc'?'size_asc':'size_desc';
+    else next=curSort==='time_desc'?'time_asc':'time_desc';
+    curSort=next; localStorage.setItem(SORT_KEY,curSort);
+    $('cloudSort').value=next;
+    markSortHeaders();
+    renderCloud($('cloudSearch').value);
+  });
+  $('insOpen').addEventListener('click',()=>{ const f=selectedOne(); if(f) openItem(f); });
+  $('insCopy').addEventListener('click',()=>{ const f=selectedOne(); if(f) copyText(formatLink(f), FMT_LABEL[curFmt]); });
+  $('insDown').addEventListener('click',()=>{ const f=selectedOne(); if(!f) return; lbCurrent=f; $('lbDownload').click(); });
+  $('insQr').addEventListener('click',()=>{ const f=selectedOne(); if(!f) return; lbCurrent=f; $('lbQr').click(); });
+  $('insDelete').addEventListener('click',()=>{ if(selected.size) $('batchDelete').click(); });
+  $('insClose').addEventListener('click',()=>{ sheetOpen=false; $('shell').classList.remove('sheet'); });
+  function commitInsRename(){
+    const f=selectedOne(); if(!f) return;
+    lbCurrent=f;
+    $('lbRenameInput').value=$('insRenameInput').value;
+    doRename();
+  }
+  $('insRename').addEventListener('click',()=>{
+    const f=selectedOne(); if(!f) return;
+    $('insRenameRow').hidden=false;
+    $('insRenameInput').value=f.key.split('/').pop();
+    $('insRenameInput').focus(); $('insRenameInput').select();
+  });
+  $('insRenameOk').addEventListener('click',commitInsRename);
+  $('insRenameInput').addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); commitInsRename(); }
+    if(e.key==='Escape'){ e.stopPropagation(); $('insRenameRow').hidden=true; }
+  });
+  document.querySelectorAll('#inspector .ins-move [data-dir]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      const f=selectedOne(); if(!f) return;
+      moveFiles([f.key], b.dataset.dir);
+    });
+  });
+  $('insFmt').addEventListener('click',e=>{
+    const b=e.target.closest('.fmt-btn');
+    const f=selectedOne();
+    if(!b||!f) return;
+    curFmt=b.dataset.fmt; localStorage.setItem(FMT_KEY,curFmt);
+    syncFmtBtns();
+    copyText(formatLink(f), FMT_LABEL[curFmt]);
+  });
+  $('ctxMenu').addEventListener('click',e=>{
+    const b=e.target.closest('button');
+    if(!b||!ctxFile||b.disabled) return;
+    const f=ctxFile;
+    const act=b.dataset.act;
+    const keys=selected.has(f.key)? [...selected] : [f.key];
+    closeCtx();
+    if(act==='open') openItem(f);
+    else if(act==='copy'){
+      curFmt=b.dataset.fmt; localStorage.setItem(FMT_KEY,curFmt); syncFmtBtns();
+      const items=keys.map(k=>cloudItems.find(x=>x.key===k)).filter(Boolean);
+      copyText(items.map(formatLink).join('\n'), items.length+' 条'+FMT_LABEL[curFmt]);
+    }else if(act==='qr'){ lbCurrent=f; $('lbQr').click(); }
+    else if(act==='down'){ lbCurrent=f; $('lbDownload').click(); }
+    else if(act==='rename'){
+      selected.clear(); selected.add(f.key); sheetOpen=true; updateBatchBar();
+      $('insRenameRow').hidden=false;
+      $('insRenameInput').value=f.key.split('/').pop();
+      $('insRenameInput').focus(); $('insRenameInput').select();
+    }else if(act==='move') moveFiles(keys, b.dataset.dir);
+    else if(act==='del') $('batchDelete').click();
+  });
 
   // 测试钩子（仅本地截图验证用）
   window.__test={
