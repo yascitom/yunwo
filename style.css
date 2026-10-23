@@ -331,14 +331,20 @@ html[data-theme=light] .gitem:hover{border-color:rgba(15,18,25,.16)}
 .grid[data-view=fall] .ftile{min-height:120px}
 .grid[data-view=fall] .empty{column-span:all}
 
+.thumb{width:100%;height:100%;overflow:hidden}
+.thumb img,.thumb video{width:100%;height:100%;object-fit:cover;display:block}
+.grid[data-view=fall] .thumb{height:auto}
+.grid[data-view=fall] .thumb img,.grid[data-view=fall] .thumb video{height:auto;max-height:420px}
+
 .grid[data-view=list]{
-  display:flex;flex-direction:column;gap:0;padding:4px 8px 28px;
+  display:flex;flex-direction:column;gap:2px;padding:4px 8px 28px;
 }
 .grid[data-view=list] .gitem{
-  aspect-ratio:auto;height:52px;width:100%;min-width:0;
+  aspect-ratio:auto;height:auto;min-height:56px;width:100%;min-width:0;
   border:none;border-radius:8px;background:transparent;
   display:grid;grid-template-columns:var(--cols);
-  align-items:center;overflow:hidden;box-shadow:none;
+  align-items:center;overflow:clip;box-shadow:none;
+  padding:8px 0;
   transition:background-color 120ms ease;
 }
 .grid[data-view=list] .gitem:hover{background:var(--hover);border-color:transparent}
@@ -348,20 +354,20 @@ html[data-theme=light] .gitem:hover{border-color:rgba(15,18,25,.16)}
   box-shadow:inset 2px 0 0 var(--accent);
 }
 .grid[data-view=list] .gitem.sel:hover{background:var(--accent-soft)}
-.grid[data-view=list] .gitem img,
-.grid[data-view=list] .gitem video,
+.grid[data-view=list] .thumb,
 .grid[data-view=list] .ftile{
-  width:36px;height:36px;border-radius:8px;grid-column:2;justify-self:center;
+  width:36px;height:36px;min-width:36px;max-width:36px;min-height:36px;max-height:36px;
+  border-radius:8px;grid-column:2;justify-self:center;align-self:center;
   background:var(--hover);border:1px solid var(--line);
 }
 .grid[data-view=list] .ftile{gap:0;padding:0}
 .grid[data-view=list] .ftile .fico{font-size:18px}
 .grid[data-view=list] .ftile .fext,.grid[data-view=list] .badge,.grid[data-view=list] .ginfo{display:none}
 .grid[data-view=list] .selbox{position:static;grid-column:1;justify-self:center;transition:background-color 120ms ease,border-color 120ms ease}
-.grid[data-view=list] .lmeta{display:flex;align-items:center;min-width:0;max-width:100%;overflow:hidden;grid-column:3}
+.grid[data-view=list] .lmeta{display:flex;align-items:center;min-width:0;max-width:100%;overflow:hidden;grid-column:3;align-self:center}
 .grid[data-view=list] .lname{
   flex:1 1 auto;min-width:0;width:auto;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.4;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:20px;
 }
 .grid[data-view=list] .lsize,.grid[data-view=list] .ltime{
   display:block;min-width:0;color:var(--muted);font-size:12px;

@@ -962,8 +962,8 @@
   function gridTile(f){
     const t=f.type||fileTypeOf(f.key);
     const u=escapeHtml(f.url); // 属性上下文必须转义，防 key 中特殊字符造成属性注入
-    if(t==='image') return '<img loading="lazy" src="'+u+'" alt="">';
-    if(t==='video') return '<video muted preload="metadata" src="'+u+'"></video><div class="badge">视频</div>';
+    if(t==='image') return '<div class="thumb"><img loading="lazy" src="'+u+'" alt=""></div>';
+    if(t==='video') return '<div class="thumb"><video muted preload="metadata" src="'+u+'"></video></div><div class="badge">视频</div>';
     return '<div class="ftile"><div class="fico">'+fileIcon(f.key)+'</div><div class="fext">'+escapeHtml((f.key.split('.').pop()||'file').slice(0,6))+'</div></div>';
   }
 
