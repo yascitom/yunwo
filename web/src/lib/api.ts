@@ -23,7 +23,13 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
     throw new ApiError('预览模式无后端', 404, 'PREVIEW')
   }
   if (r.status === 404) throw new ApiError('预览模式无后端', 404, 'PREVIEW')
-  const data = await r.json().catch(() => ({})) as { error?: string; code?: string }
+  const raw = await r.text()
+  if (!raw.trim() && r.status >= 500) throw new ApiError('预览模式无后端', r.status, 'PREVIEW')
+  let data: { error?: string; code?: string } = {}
+  if (raw) {
+    try { data = JSON.parse(raw) as { error?: string; code?: string } }
+    catch { throw new ApiError('服务端返回异常', r.status) }
+  }
   if (r.status === 401) {
     expireAuth()
     throw new ApiError(data.error || '登录已过期，请重新输入密码', 401)
@@ -48,7 +54,9 @@ export async function checkAuth(payload: { password?: string; auth?: string }): 
       body: JSON.stringify({ check: true, ...payload }),
     })
     if (r.status === 404) return { preview: true }
-    const data = await r.json().catch(() => ({})) as { error?: string; maxMB?: number; token?: string }
+    const raw = await r.text()
+    if (!raw.trim() && r.status >= 500) return { preview: true }
+    const data = (raw ? JSON.parse(raw) : {}) as { error?: string; maxMB?: number; token?: string }
     if (r.ok) return { ok: true, maxMB: data.maxMB, token: data.token }
     if (r.status === 401) return { ok: false, expired: true, msg: data.error || '密码错误或会话已过期' }
     return { ok: false, msg: data.error || `服务端错误 ${r.status}` }

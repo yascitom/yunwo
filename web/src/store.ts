@@ -153,7 +153,7 @@ export const useDrive = create<State>((set, get) => ({
       set({
         loading: false,
         files: append ? get().files : [],
-        hint: preview ? '静态预览模式：云端文件需部署后使用' : '加载失败：' + err.message,
+        hint: preview ? '接口暂时不可用' : '加载失败：' + err.message,
       })
     }
   },

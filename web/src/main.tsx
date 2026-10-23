@@ -9,7 +9,7 @@ import './index.css'
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false} storageKey="yunwo_theme">
-      <TooltipProvider>
+      <TooltipProvider delayDuration={400} skipDelayDuration={150}>
         <App />
         <Toaster position="top-center" />
       </TooltipProvider>
