@@ -36,8 +36,10 @@
 ## 目录结构
 
 ```
-├── index.html                    # 前端页面（登录门禁/分片上传/断点续传/云端文件/灯箱/历史记录）
-├── favicon.png                   # 站点图标
+├── index.html                    # 构建产物（由 web/ 生成，站点入口）
+├── assets/                       # 构建产物
+├── web/                          # 前端源码（React + Vite + shadcn/ui）
+├── favicon.svg
 ├── functions/api/
 │   ├── sign.js                   # 小文件上传签名 + 密码预检（EdgeOne Pages / CF Pages 直接用）
 │   ├── list.js                   # 列出桶内文件（支持目录参数）
@@ -80,6 +82,8 @@
 | `PART_SIZE_MB` | （可选，默认 10） | 分片大小（MB），范围 5~100。网络差调小（重试代价小），网络好调大（签名次数少） |
 
 ## 部署方式一：EdgeOne Makers（推荐）
+
+本地改界面后，在 `web/` 执行 `npm install` 与 `npm run build`，会把静态文件写回仓库根目录（`index.html` 与 `assets/`），再部署。
 
 1. 把本目录推送到 CNB / GitHub 仓库（**环境变量不要写进代码**，在控制台配）
 2. EdgeOne Pages → 新建项目 → 导入仓库 → 根目录直接部署（`functions/api/*.js` 会自动注册为 `/api/*`）
