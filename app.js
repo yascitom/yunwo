@@ -379,19 +379,20 @@
   });
 
   function fmtSize(bytes){
-    if(bytes>=1048576) return (bytes/1048576).toFixed(1)+' MB';
-    return (bytes/1024).toFixed(0)+' KB';
+    const n=Number(bytes);
+    if(!Number.isFinite(n) || n<0) return '—';
+    if(n>=1073741824) return (n/1073741824).toFixed(n>=10737418240?1:2)+' GB';
+    if(n>=1048576) return (n/1048576).toFixed(1)+' MB';
+    if(n>=1024) return Math.round(n/1024)+' KB';
+    return Math.round(n)+' B';
   }
   function fmtTime(t){
     const d=new Date(t);
-    if(Number.isNaN(d.getTime())) return '';
-    const hm=d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'});
-    const now=new Date();
-    if(d.toDateString()===now.toDateString()) return '今天 '+hm;
-    const yest=new Date(now); yest.setDate(now.getDate()-1);
-    if(d.toDateString()===yest.toDateString()) return '昨天 '+hm;
-    return d.toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'})+' '+hm;
+    if(Number.isNaN(d.getTime())) return '—';
+    const p=n=>String(n).padStart(2,'0');
+    return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
   }
+  function sizeText(n){ return (n==null||n==='') ? '—' : fmtSize(n); }
 
   function handleFiles(files){
     if(!files.length) return;
@@ -864,6 +865,7 @@
   let dragKeys=null;          // 正在拖拽移动的文件 key 列表
   let sheetOpen=false;        // 窄屏底部详情是否打开
   let rowClickTimer=0;
+  let anchorKey='';           // Shift 连选的起点
   const TYPE_DIR={image:'img',video:'video',other:'other'};
 
   // 视图切换：平铺 grid / 瀑布流 fall / 列表 list（记住用户选择）
@@ -980,45 +982,59 @@
     }
     items.forEach((f)=>{
       const d=document.createElement('div');
+      const nm=f.key.split('/').pop()||'未命名';
       d.className='gitem';
       d.dataset.key=f.key;
-      const nm=f.key.split('/').pop();
-      const sub=(f.size?fmtSize(f.size):'')+(f.size&&f.time?' · ':'')+(f.time?new Date(f.time).toLocaleDateString():'');
+      d.title=nm;
+      const sub=(f.size!=null?fmtSize(f.size):'')+(f.size!=null&&f.time?' · ':'')+(f.time?fmtTime(f.time):'');
       d.innerHTML=gridTile(f)+'<button type="button" class="selbox" aria-label="选择"></button>'
         +'<div class="ginfo"><div class="gname">'+escapeHtml(nm)+'</div><div class="gsub">'+escapeHtml(sub)+'</div></div>'
         +'<div class="lmeta"><span class="lname">'+escapeHtml(nm)+'</span></div>'
-        +'<div class="lsize">'+(f.size?fmtSize(f.size):'—')+'</div>'
+        +'<div class="lsize">'+sizeText(f.size)+'</div>'
         +'<div class="ltime">'+(f.time?fmtTime(f.time):'—')+'</div>'
         +'<button type="button" class="rowmore" aria-label="更多"></button>';
       if(selected.has(f.key)) d.classList.add('sel');
-      const toggle=()=>{
+      d.querySelector('.selbox').addEventListener('click',e=>{
+        e.stopPropagation();
         if(selected.has(f.key)) selected.delete(f.key); else selected.add(f.key);
-        sheetOpen=false;
-        updateBatchBar();
-      };
-      d.querySelector('.selbox').addEventListener('click',e=>{ e.stopPropagation(); clearTimeout(rowClickTimer); toggle(); });
+        anchorKey=f.key; sheetOpen=false; updateBatchBar();
+      });
       d.querySelector('.rowmore').addEventListener('click',e=>{
         e.stopPropagation();
-        clearTimeout(rowClickTimer);
         openCtx(0, 0, f, e.currentTarget);
       });
       d.addEventListener('click',e=>{
         if(e.target.closest('.selbox')||e.target.closest('.rowmore')) return;
         if(window.matchMedia('(pointer:coarse)').matches){
-          clearTimeout(rowClickTimer);
-          selected.clear(); selected.add(f.key); sheetOpen=true; updateBatchBar();
+          selected.clear(); selected.add(f.key); anchorKey=f.key; sheetOpen=true; updateBatchBar();
           return;
         }
         if(e.detail>1) return;
-        clearTimeout(rowClickTimer);
-        rowClickTimer=setTimeout(toggle, 220);
+        if(e.shiftKey && anchorKey){
+          const keys=viewItems.map(x=>x.key);
+          const a=keys.indexOf(anchorKey), b=keys.indexOf(f.key);
+          if(a>=0 && b>=0){
+            const lo=Math.min(a,b), hi=Math.max(a,b);
+            selected.clear();
+            for(let i=lo;i<=hi;i++) selected.add(keys[i]);
+            sheetOpen=false; updateBatchBar();
+            return;
+          }
+        }
+        if(e.ctrlKey||e.metaKey){
+          if(selected.has(f.key)) selected.delete(f.key); else selected.add(f.key);
+          anchorKey=f.key; sheetOpen=false; updateBatchBar();
+          return;
+        }
+        if(!(selected.size===1 && selected.has(f.key))){
+          selected.clear(); selected.add(f.key);
+        }
+        anchorKey=f.key; sheetOpen=false; updateBatchBar();
       });
       d.addEventListener('dblclick',e=>{
         if(e.target.closest('.selbox')||e.target.closest('.rowmore')) return;
-        clearTimeout(rowClickTimer);
         if(!selected.has(f.key)){ selected.clear(); selected.add(f.key); }
-        sheetOpen=false;
-        updateBatchBar();
+        anchorKey=f.key; sheetOpen=false; updateBatchBar();
         openItem(f);
       });
       d.addEventListener('contextmenu',e=>{
@@ -1472,7 +1488,7 @@
     const t=f.type||fileTypeOf(f.key);
     const name=f.key.split('/').pop();
     $('insName').textContent=name;
-    $('insSize').textContent=f.size?fmtSize(f.size):'—';
+    $('insSize').textContent=sizeText(f.size);
     $('insType').textContent=t==='image'?'图片':t==='video'?'视频':'文件';
     $('insTime').textContent=f.time?fmtTime(f.time):'—';
     $('insWhere').textContent=({img:'图片',video:'视频',other:'其他'}[f.key.split('/')[1]]||'文件');
