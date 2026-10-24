@@ -380,7 +380,7 @@ export function Drive() {
 
       {menu ? <button type="button" className="fixed inset-0 z-40 cursor-default" aria-label="关闭菜单" onClick={() => setMenu(null)} /> : null}
       {menu ? (
-        <div className="glass fixed z-50 min-w-44 origin-top-left animate-in rounded-xl border p-1 text-sm shadow-lg fade-in-0 zoom-in-95 duration-150" style={{ left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 320) }}>
+        <div className="glass fixed z-50 min-w-44 origin-top-left animate-in rounded-xl border p-1 text-sm shadow-lg fade-in-0 duration-100" style={{ left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 320) }}>
           <MenuBtn onClick={() => { openFile(menu.file); setMenu(null) }}>打开</MenuBtn>
           {(['url', 'md', 'html', 'bbcode'] as LinkFmt[]).map((f) => <MenuBtn key={f} onClick={() => { s.setFmt(f); void copy(s.selected.length > 1 ? s.files.filter((x) => s.selected.includes(x.key)) : [menu.file], f); setMenu(null) }}>复制 {f.toUpperCase()}</MenuBtn>)}
           <MenuBtn onClick={() => { download(menu.file); setMenu(null) }}>下载</MenuBtn>
