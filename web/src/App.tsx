@@ -2,13 +2,21 @@ import { useEffect } from 'react'
 import { LoginScreen } from '@/components/LoginScreen'
 import { Drive } from '@/components/Drive'
 import { checkAuth } from '@/lib/api'
-import { getToken, saveToken } from '@/lib/auth'
+import { clearSession, getToken, onAuthExpired, saveToken } from '@/lib/auth'
 import { useDrive } from '@/store'
 
 export default function App() {
   const unlocked = useDrive((s) => s.unlocked)
   const setUnlocked = useDrive((s) => s.setUnlocked)
   const setBootMsg = useDrive((s) => s.setBootMsg)
+
+  useEffect(() => {
+    return onAuthExpired(() => {
+      clearSession()
+      setUnlocked(false)
+      setBootMsg('登录已过期，请重新输入密码')
+    })
+  }, [setUnlocked, setBootMsg])
 
   useEffect(() => {
     const token = getToken()

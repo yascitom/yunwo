@@ -72,22 +72,43 @@ export function Drive() {
   const [armed, setArmed] = useState(false)
   const [dropDir, setDropDir] = useState<DirId | null>(null)
   const [xfer, setXfer] = useState(false)
+  const conflictRef = useRef<{ name: string; resolve: (v: string | null) => void } | null>(null)
   const running = summary.count - summary.done - summary.fail
 
   const visible = useMemo(() => visibleFiles(s), [s])
   const one = s.selected.length === 1 ? s.files.find((f) => f.key === s.selected[0]) || null : null
+  const browsing = !xfer && !s.recent
 
   useEffect(() => { void s.load(false) }, [])
   useEffect(() => {
     setConflictAsker((name) => new Promise((resolve) => {
+      const entry = { name, resolve }
+      conflictRef.current = entry
       setConflictInput(name)
-      setConflict({ name, resolve })
+      setConflict(entry)
     }))
     setUploadDone((info) => {
-      s.remember(info.url)
-      s.prepend({ key: info.key, url: info.url, size: info.size, time: new Date().toISOString(), type: fileTypeOf(info.key) })
+      const st = useDrive.getState()
+      st.remember(info.url)
+      st.prepend({ key: info.key, url: info.url, size: info.size, time: new Date().toISOString(), type: fileTypeOf(info.key) })
     })
-  }, [s])
+    return () => {
+      setConflictAsker(async () => null)
+      const open = conflictRef.current
+      if (open) {
+        open.resolve(null)
+        conflictRef.current = null
+        setConflict(null)
+      }
+    }
+  }, [])
+
+  useEffect(() => { setArmed(false) }, [s.selected])
+
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) meta.setAttribute('content', theme === 'dark' ? '#0e0f11' : '#ffffff')
+  }, [theme])
 
   useEffect(() => {
     let depth = 0
@@ -131,15 +152,23 @@ export function Drive() {
       const tag = (document.activeElement?.tagName || '')
       const typing = tag === 'INPUT' || tag === 'TEXTAREA'
       if (e.key === 'Escape') {
-        setMenu(null); setQr(null); s.openLight(null); s.clearSel(); setSheet(false); return
+        if (menu) { setMenu(null); return }
+        if (qr) { setQr(null); return }
+        if (s.renameFor || conflict) return
+        if (s.light) { s.openLight(null); return }
+        if (sheet) { setSheet(false); return }
+        if (side) { setSide(false); return }
+        setArmed(false)
+        s.clearSel()
+        return
       }
-      if (typing) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !s.recent && !xfer) {
+      if (typing || !browsing) return
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
         s.selectAll(visible.map((f) => f.key))
-      } else if (e.key === 'Delete' && s.selected.length) {
-        void s.removeKeys(s.selected)
-      } else if (e.key === 'Enter' && one) {
+      } else if (e.key === 'Delete' && s.selected.length && !s.light && !s.renameFor && !conflict) {
+        askDelete(s.selected)
+      } else if (e.key === 'Enter' && one && !s.light) {
         openFile(one)
       } else if (s.light && e.key === 'ArrowRight') step(1)
       else if (s.light && e.key === 'ArrowLeft') step(-1)
@@ -147,6 +176,25 @@ export function Drive() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   })
+
+  function askDelete(keys: string[], quiet = false) {
+    if (!keys.length) return
+    if (!armed) {
+      setArmed(true)
+      window.setTimeout(() => setArmed(false), 3000)
+      if (!quiet) toast.message(`再按 Delete 或再点「删除」确认（${keys.length} 个）`)
+      return
+    }
+    setArmed(false)
+    void s.removeKeys(keys)
+  }
+  function resolveConflict(v: string | null) {
+    const open = conflictRef.current || conflict
+    if (!open) return
+    open.resolve(v)
+    conflictRef.current = null
+    setConflict(null)
+  }
 
   function step(d: number) {
     if (!s.light) return
@@ -183,11 +231,18 @@ export function Drive() {
   }
   function onRowClick(e: React.MouseEvent, f: CloudFile) {
     if ((e.target as HTMLElement).closest('[data-stop]')) return
-    if (narrow) { s.selectOnly(f.key); setSheet(true); return }
     if (e.detail > 1) return
+    const multi = e.shiftKey || e.ctrlKey || e.metaKey
+    if (narrow && !multi) {
+      if (s.selected.length === 1 && s.selected[0] === f.key) { s.clearSel(); setSheet(false); return }
+      s.selectOnly(f.key)
+      setSheet(true)
+      return
+    }
     if (e.shiftKey) s.selectRange(f.key, visible.map((x) => x.key))
     else if (e.ctrlKey || e.metaKey) s.toggleKey(f.key)
-    else if (!(s.selected.length === 1 && s.selected[0] === f.key)) s.selectOnly(f.key)
+    else if (s.selected.length === 1 && s.selected[0] === f.key) s.clearSel()
+    else s.selectOnly(f.key)
   }
 
   const dragging = useRef<string[]>([])
@@ -221,7 +276,7 @@ export function Drive() {
                 key={d.id}
                 type="button"
                 className={navClass(!xfer && !s.recent && s.dir === d.id, dropDir === d.id)}
-                onClick={() => { setXfer(false); s.setDir(d.id); setSide(false) }}
+                onClick={() => { setXfer(false); setArmed(false); s.setDir(d.id); setSide(false) }}
                 onDragOver={(e) => { if (d.id !== 'all' && dragging.current.length) { e.preventDefault(); setDropDir(d.id) } }}
                 onDragLeave={() => setDropDir((cur) => cur === d.id ? null : cur)}
                 onDrop={(e) => {
@@ -238,12 +293,12 @@ export function Drive() {
             ))}
           </div>
           <p className="px-2.5 pt-4 pb-1 text-[11px] font-medium text-muted-foreground">传输</p>
-          <button type="button" className={navClass(xfer)} onClick={() => { setXfer(true); s.setRecent(false); setSide(false); setSheet(false) }}>
+          <button type="button" className={navClass(xfer)} onClick={() => { setXfer(true); s.setRecent(false); s.clearSel(); setArmed(false); setSide(false); setSheet(false) }}>
             <ArrowDownUp className="size-4" /> 传输
             {running > 0 ? <span className="ml-auto rounded-full bg-foreground px-1.5 text-[10px] font-medium text-background tabular-nums">{running}</span> : summary.count > 0 ? <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{summary.count}</span> : null}
           </button>
           <p className="px-2.5 pt-4 pb-1 text-[11px] font-medium text-muted-foreground">本地</p>
-          <button type="button" className={navClass(s.recent && !xfer)} onClick={() => { setXfer(false); s.setRecent(true); setSide(false) }}>
+          <button type="button" className={navClass(s.recent && !xfer)} onClick={() => { setXfer(false); s.setRecent(true); s.clearSel(); setArmed(false); setSide(false); setSheet(false) }}>
             <Clock className="size-4" /> 本机最近
           </button>
         </ScrollArea>
@@ -327,7 +382,7 @@ export function Drive() {
                 <DropdownMenuContent align="end" className="w-72 p-3">
                   <div className="mb-2 text-xs font-medium">上传设置</div>
                   <label className="flex items-center justify-between gap-3 py-1 text-sm">保留原文件名 <Toggle checked={keep} onCheckedChange={(v) => { setKeep(!!v); localStorage.setItem('yunwo_keepname', v ? '1' : '0') }} /></label>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">同名文件已存在时，上传会失败</p>
+                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">同名时会提示重命名，或自动加编码继续</p>
                   <label className="mt-3 flex items-center justify-between gap-3 py-1 text-sm">图片压缩为 WebP <Toggle checked={webp} onCheckedChange={(v) => { setWebp(!!v); localStorage.setItem('yunwo_webp', v ? '1' : '0') }} /></label>
                   {webp ? <div className="mt-3"><div className="mb-2 text-xs text-muted-foreground">画质 {quality}%</div><Slider value={[quality]} min={10} max={100} onValueChange={(v) => { const n = v[0] ?? 82; setQuality(n); localStorage.setItem('yunwo_quality', String(n)) }} /></div> : null}
                   <p className="mt-3 text-xs leading-relaxed text-muted-foreground">单文件最大 {getMaxSizeMB()} MB · 大文件分片，可断点续传</p>
@@ -340,10 +395,7 @@ export function Drive() {
               <Button size="sm" variant="outline" onClick={() => s.selectAll(visible.map((f) => f.key))}>全选</Button>
               <Button size="sm" variant="outline" onClick={() => s.invert(visible.map((f) => f.key))}>反选</Button>
               <Button size="sm" variant="outline" onClick={() => void copy(s.files.filter((f) => s.selected.includes(f.key)))}>复制链接</Button>
-              <Button size="sm" variant="destructive" onClick={() => {
-                if (!armed) { setArmed(true); window.setTimeout(() => setArmed(false), 3000); return }
-                setArmed(false); void s.removeKeys(s.selected)
-              }}>{armed ? `再点确认删除 ${s.selected.length} 个` : '删除'}</Button>
+              <Button size="sm" variant="destructive" onClick={() => askDelete(s.selected, true)}>{armed ? `再点确认删除 ${s.selected.length} 个` : '删除'}</Button>
               <Button size="sm" variant="ghost" onClick={() => { setArmed(false); s.clearSel() }}>取消</Button>
             </div>
           )}
@@ -390,12 +442,12 @@ export function Drive() {
         ) : null}
       </div>
 
-      {one && !narrow && !s.recent && !xfer ? <Inspector file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => void s.removeKeys([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
+      {one && !narrow && browsing ? <Inspector file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => askDelete([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
 
-      <Sheet open={!!(narrow && sheet && one && !xfer)} onOpenChange={setSheet}>
+      <Sheet open={!!(narrow && sheet && one && browsing)} onOpenChange={setSheet}>
         <SheetContent side="bottom" className="glass max-h-[80svh] overflow-auto">
           <SheetHeader><SheetTitle>详细信息</SheetTitle></SheetHeader>
-          {one ? <InspectorBody file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => void s.removeKeys([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
+          {one ? <InspectorBody file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => askDelete([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
         </SheetContent>
       </Sheet>
 
@@ -412,7 +464,7 @@ export function Drive() {
           {(['img', 'video', 'other'] as const).map((d) => (
             <MenuBtn key={d} disabled={dirOf(menu.file.key) === d} onClick={() => { void s.move(s.selected.includes(menu.file.key) ? s.selected : [menu.file.key], d); setMenu(null) }}>{dirLabel(d)}</MenuBtn>
           ))}
-          <MenuBtn className="text-destructive" onClick={() => { void s.removeKeys(s.selected.includes(menu.file.key) ? s.selected : [menu.file.key]); setMenu(null) }}>删除</MenuBtn>
+          <MenuBtn className="text-destructive" onClick={() => { const keys = s.selected.includes(menu.file.key) ? s.selected : [menu.file.key]; setMenu(null); askDelete(keys) }}>删除</MenuBtn>
         </div>
       ) : null}
 
@@ -440,15 +492,23 @@ export function Drive() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!conflict} onOpenChange={(o) => { if (!o && conflict) { conflict.resolve(null); setConflict(null) } }}>
+      <Dialog open={!!conflict} onOpenChange={(o) => { if (!o) resolveConflict(null) }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader><DialogTitle>已存在同名文件</DialogTitle></DialogHeader>
           <p className="text-xs leading-relaxed break-all text-muted-foreground">{conflict?.name}</p>
-          <Input value={conflictInput} onChange={(e) => setConflictInput(e.target.value)} />
+          <Input
+            value={conflictInput}
+            onChange={(e) => setConflictInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              if (!conflictInput.trim()) { toast.error('文件名不能为空'); return }
+              resolveConflict(conflictInput.trim())
+            }}
+          />
           <DialogFooter className="sm:flex-wrap">
-            <Button variant="outline" onClick={() => { conflict?.resolve(null); setConflict(null) }}>取消</Button>
-            <Button variant="outline" onClick={() => { conflict?.resolve('__auto__'); setConflict(null) }}>加编码继续</Button>
-            <Button onClick={() => { if (!conflictInput.trim()) { toast.error('文件名不能为空'); return } conflict?.resolve(conflictInput.trim()); setConflict(null) }}>重命名上传</Button>
+            <Button variant="outline" onClick={() => resolveConflict(null)}>取消</Button>
+            <Button variant="outline" onClick={() => resolveConflict('__auto__')}>加编码继续</Button>
+            <Button onClick={() => { if (!conflictInput.trim()) { toast.error('文件名不能为空'); return } resolveConflict(conflictInput.trim()) }}>重命名上传</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

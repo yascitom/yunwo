@@ -1,6 +1,5 @@
 import { toast } from 'sonner'
-import { authFields, MP_KEY_NAME } from './auth'
-import { ApiError } from './api'
+import { authFields, expireAuth, MP_KEY_NAME } from './auth'
 import { fileTypeOf, fmtSize } from './files'
 
 const MP_THRESHOLD = 10 * 1024 * 1024
@@ -26,6 +25,7 @@ let uploading = false
 const items: QueueItem[] = []
 const pending: QueueItem[] = []
 const listeners = new Set<() => void>()
+let snapshot: QueueItem[] = items
 let askName: (name: string) => Promise<string | null> = async () => null
 let onDone: (info: DoneInfo) => void = () => {}
 
@@ -35,11 +35,14 @@ export function setConflictAsker(fn: (name: string) => Promise<string | null>) {
 export function setUploadDone(fn: (info: DoneInfo) => void) { onDone = fn }
 export function subscribeQueue(fn: () => void) {
   listeners.add(fn)
-  return () => listeners.delete(fn)
+  return () => { listeners.delete(fn) }
 }
-export function getQueue() { return items }
+export function getQueue() { return snapshot }
 
-function emit() { listeners.forEach((fn) => fn()) }
+function emit() {
+  snapshot = items.slice()
+  listeners.forEach((fn) => fn())
+}
 
 class UpErr extends Error {
   code?: string
@@ -196,7 +199,7 @@ async function getSign(file: File) {
   })
   if (sr.status === 404) throw new UpErr('预览模式无后端', 'PREVIEW')
   const sign = await sr.json().catch(() => ({})) as { error?: string; host?: string; url?: string; dir?: string; fields?: Record<string, string> }
-  if (sr.status === 401) throw new UpErr('登录已过期，请重新输入密码')
+  if (sr.status === 401) { expireAuth(); throw new UpErr('登录已过期，请重新输入密码') }
   if (!sr.ok) throw new UpErr(sign.error || `签名失败 ${sr.status}`)
   return sign as { host: string; url: string; dir: string; fields: Record<string, string> }
 }
@@ -242,7 +245,10 @@ async function uploadSimple(item: QueueItem, file: File) {
       setQ(item, 5, '签名已过期，自动重签重传…')
       sign = await getSign(file)
       ur = await postToOSS(sign, file, item, progress)
-      if (ur.status === 409) throw new UpErr('同名文件已存在', 'CONFLICT')
+      if (!ur.ok) {
+        const t2 = await ur.text().catch(() => '')
+        if (ur.status === 409 || /FileAlreadyExists/i.test(t2)) throw new UpErr('同名文件已存在', 'CONFLICT')
+      }
     }
   }
   if (!ur.ok) throw new UpErr('OSS 返回 ' + ur.status)
@@ -282,7 +288,7 @@ async function mpApi(payload: Record<string, unknown>) {
   })
   if (r.status === 404) throw new UpErr('预览模式无后端', 'PREVIEW')
   const data = await r.json().catch(() => ({})) as { error?: string; code?: string }
-  if (r.status === 401) throw new UpErr('登录已过期，请重新输入密码')
+  if (r.status === 401) { expireAuth(); throw new UpErr('登录已过期，请重新输入密码') }
   if (!r.ok) throw new UpErr(data.error || `分片服务错误 ${r.status}`, data.code)
   return data as Record<string, unknown>
 }
@@ -516,7 +522,7 @@ async function processQueue() {
         continue
       }
       if (err.code === 'CANCELLED') { removeItem(item); continue }
-      if (err instanceof ApiError && err.code === 'PREVIEW') {
+      if (err.code === 'PREVIEW') {
         item.state = 'err'
         setQ(item, 100, '预览模式无后端', 'err')
         toast.error('预览模式无后端')

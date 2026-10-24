@@ -19,7 +19,7 @@ const MP_KEY = 'yunwo_multipart_tasks'
 const expiredListeners = new Set<() => void>()
 export function onAuthExpired(fn: () => void) {
   expiredListeners.add(fn)
-  return () => expiredListeners.delete(fn)
+  return () => { expiredListeners.delete(fn) }
 }
 export function expireAuth() {
   localStorage.removeItem(TOKEN_KEY)

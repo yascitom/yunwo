@@ -19,12 +19,13 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...body, ...authFields() }),
     })
-  } catch {
-    throw new ApiError('预览模式无后端', 404, 'PREVIEW')
+  } catch (e) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new ApiError('网络不可用', 0)
+    throw new ApiError('无法连接接口', 0, e instanceof TypeError ? 'NETWORK' : 'PREVIEW')
   }
   if (r.status === 404) throw new ApiError('预览模式无后端', 404, 'PREVIEW')
   const raw = await r.text()
-  if (!raw.trim() && r.status >= 500) throw new ApiError('预览模式无后端', r.status, 'PREVIEW')
+  if (!raw.trim() && r.status >= 500) throw new ApiError('接口暂时不可用', r.status, 'PREVIEW')
   let data: { error?: string; code?: string } = {}
   if (raw) {
     try { data = JSON.parse(raw) as { error?: string; code?: string } }

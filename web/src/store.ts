@@ -133,7 +133,7 @@ export const useDrive = create<State>((set, get) => ({
     keys.forEach((k) => { if (next.has(k)) next.delete(k); else next.add(k) })
     return { selected: [...next] }
   }),
-  clearSel: () => set({ selected: [] }),
+  clearSel: () => set({ selected: [], anchor: '' }),
   load: async (append = false) => {
     const { dir, cursor } = get()
     if (!append) set({ loading: true, hint: '', files: [], cursor: '', truncated: false, selected: [] })
@@ -149,11 +149,11 @@ export const useDrive = create<State>((set, get) => ({
       }))
     } catch (e) {
       const err = e as ApiError
-      const preview = err.code === 'PREVIEW' || err.status === 404
+      const soft = err.code === 'PREVIEW' || err.code === 'NETWORK' || err.status === 404 || err.status >= 500
       set({
         loading: false,
         files: append ? get().files : [],
-        hint: preview ? '接口暂时不可用' : '加载失败：' + err.message,
+        hint: soft ? (err.message || '接口暂时不可用') : '加载失败：' + err.message,
       })
     }
   },
@@ -204,7 +204,8 @@ export const useDrive = create<State>((set, get) => ({
         const data = await moveFile(f.key, dir)
         set((s) => ({
           files: s.files.map((x) => x.key === f.key ? { ...x, key: data.key, url: data.url } : x),
-          selected: s.selected.filter((k) => k !== f.key && k !== (data.oldKey || '')),
+          selected: s.selected.map((k) => k === f.key ? data.key : k),
+          light: s.light?.key === f.key ? { ...s.light, key: data.key, url: data.url } : s.light,
         }))
         if (data.warn) toast.error(data.warn)
         ok++
