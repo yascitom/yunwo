@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { toast } from 'sonner'
 import QRCode from 'qrcode'
 import {
-  Box, ChevronDown, ChevronRight, Clock, Cloud, Columns2, Film, Folder, Image as ImageIcon, LayoutGrid, LogOut, Moon, MoreHorizontal,
+  ArrowDownUp, Box, ChevronDown, ChevronRight, Clock, Cloud, Columns2, Film, Folder, Image as ImageIcon, LayoutGrid, LogOut, Moon, MoreHorizontal,
   RefreshCw, Rows3, Search, Sun, Upload,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
@@ -71,6 +71,8 @@ export function Drive() {
   const [side, setSide] = useState(false)
   const [armed, setArmed] = useState(false)
   const [dropDir, setDropDir] = useState<DirId | null>(null)
+  const [xfer, setXfer] = useState(false)
+  const running = summary.count - summary.done - summary.fail
 
   const visible = useMemo(() => visibleFiles(s), [s])
   const one = s.selected.length === 1 ? s.files.find((f) => f.key === s.selected[0]) || null : null
@@ -98,11 +100,17 @@ export function Drive() {
       e.preventDefault()
       depth = 0
       setDrop(false)
-      if (e.dataTransfer?.files.length) enqueue([...e.dataTransfer.files])
+      if (e.dataTransfer?.files.length) {
+        enqueue([...e.dataTransfer.files])
+        setFolded(false)
+      }
     }
     const paste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean) as File[]
-      if (files.length) enqueue(files)
+      if (files.length) {
+        enqueue(files)
+        setFolded(false)
+      }
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragleave', leave)
@@ -126,7 +134,7 @@ export function Drive() {
         setMenu(null); setQr(null); s.openLight(null); s.clearSel(); setSheet(false); return
       }
       if (typing) return
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !s.recent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !s.recent && !xfer) {
         e.preventDefault()
         s.selectAll(visible.map((f) => f.key))
       } else if (e.key === 'Delete' && s.selected.length) {
@@ -212,8 +220,8 @@ export function Drive() {
               <button
                 key={d.id}
                 type="button"
-                className={navClass(!s.recent && s.dir === d.id, dropDir === d.id)}
-                onClick={() => { s.setDir(d.id); setSide(false) }}
+                className={navClass(!xfer && !s.recent && s.dir === d.id, dropDir === d.id)}
+                onClick={() => { setXfer(false); s.setDir(d.id); setSide(false) }}
                 onDragOver={(e) => { if (d.id !== 'all' && dragging.current.length) { e.preventDefault(); setDropDir(d.id) } }}
                 onDragLeave={() => setDropDir((cur) => cur === d.id ? null : cur)}
                 onDrop={(e) => {
@@ -229,8 +237,13 @@ export function Drive() {
               </button>
             ))}
           </div>
+          <p className="px-2.5 pt-4 pb-1 text-[11px] font-medium text-muted-foreground">传输</p>
+          <button type="button" className={navClass(xfer)} onClick={() => { setXfer(true); s.setRecent(false); setSide(false); setSheet(false) }}>
+            <ArrowDownUp className="size-4" /> 传输
+            {running > 0 ? <span className="ml-auto rounded-full bg-foreground px-1.5 text-[10px] font-medium text-background tabular-nums">{running}</span> : summary.count > 0 ? <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{summary.count}</span> : null}
+          </button>
           <p className="px-2.5 pt-4 pb-1 text-[11px] font-medium text-muted-foreground">本地</p>
-          <button type="button" className={navClass(s.recent)} onClick={() => { s.setRecent(true); setSide(false) }}>
+          <button type="button" className={navClass(s.recent && !xfer)} onClick={() => { setXfer(false); s.setRecent(true); setSide(false) }}>
             <Clock className="size-4" /> 本机最近
           </button>
         </ScrollArea>
@@ -267,7 +280,7 @@ export function Drive() {
         <header ref={barRef} className="glass-bar sticky top-0 z-20 flex min-h-12 flex-wrap items-center gap-x-2 gap-y-2 border-b px-3 py-2">
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSide(true)} aria-label="目录"><Rows3 /></Button>
           <div className="flex min-w-0 items-center gap-1 text-sm">
-            {s.recent ? <span className="font-medium">本机最近</span> : s.dir === 'all' ? <span className="font-medium">全部文件</span> : (
+            {xfer ? <span className="font-medium">传输</span> : s.recent ? <span className="font-medium">本机最近</span> : s.dir === 'all' ? <span className="font-medium">全部文件</span> : (
               <>
                 <span className="text-muted-foreground">全部文件</span>
                 <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
@@ -275,11 +288,15 @@ export function Drive() {
               </>
             )}
           </div>
-          <div className="relative hidden min-w-40 max-w-xs flex-1 sm:block">
+          {!xfer ? <div className="relative hidden min-w-40 max-w-xs flex-1 sm:block">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={s.query} onChange={(e) => s.setQuery(e.target.value)} placeholder="筛选当前目录" className="h-8 border-transparent bg-background/45 pl-8 shadow-none focus-visible:border-ring focus-visible:bg-background" />
-          </div>
-          {s.selected.length === 0 ? (
+          </div> : null}
+          {xfer ? (
+            <div className="ml-auto">
+              <Button onClick={() => document.getElementById('file-pick')?.click()}><Upload /> 上传</Button>
+            </div>
+          ) : s.selected.length === 0 ? (
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
               <Select value={s.sort} onValueChange={(v) => s.setSort(v as typeof s.sort)}>
                 <SelectTrigger className="h-8 w-[118px]"><SelectValue /></SelectTrigger>
@@ -316,7 +333,6 @@ export function Drive() {
                   <p className="mt-3 text-xs leading-relaxed text-muted-foreground">单文件最大 {getMaxSizeMB()} MB · 大文件分片，可断点续传</p>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <input id="file-pick" type="file" multiple hidden onChange={(e) => { enqueue([...(e.target.files || [])]); e.target.value = '' }} />
             </div>
           ) : (
             <div className="ml-auto flex flex-wrap items-center gap-1.5">
@@ -331,9 +347,10 @@ export function Drive() {
               <Button size="sm" variant="ghost" onClick={() => { setArmed(false); s.clearSel() }}>取消</Button>
             </div>
           )}
+          <input id="file-pick" type="file" multiple hidden onChange={(e) => { enqueue([...(e.target.files || [])]); setFolded(false); e.target.value = '' }} />
         </header>
 
-          {s.recent ? <Recent /> : s.loading ? (
+          {xfer ? <TransferPage items={queue} summary={summary} /> : s.recent ? <Recent /> : s.loading ? (
             <div className="px-3 py-2">
               {Array.from({ length: 8 }, (_, i) => (
                 <div key={i} className="flex h-12 items-center gap-3">
@@ -360,7 +377,11 @@ export function Drive() {
             />
           )}
         </div>
-        {!s.recent ? (
+        {xfer ? (
+          <footer className="glass-bar flex h-9 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
+            <span className="tabular-nums">{summary.count ? summary.title : '没有传输任务'}</span>
+          </footer>
+        ) : !s.recent ? (
           <footer className="glass-bar flex h-9 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
             <span className="tabular-nums">{s.query ? `筛选出 ${visible.length} / 共 ${s.files.length}` : `${s.files.length} 个文件`}</span>
             {s.hint && s.files.length ? <span className="truncate text-amber-700 dark:text-amber-300">{s.hint}</span> : null}
@@ -369,9 +390,9 @@ export function Drive() {
         ) : null}
       </div>
 
-      {one && !narrow && !s.recent ? <Inspector file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => void s.removeKeys([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
+      {one && !narrow && !s.recent && !xfer ? <Inspector file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => void s.removeKeys([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
 
-      <Sheet open={!!(narrow && sheet && one)} onOpenChange={setSheet}>
+      <Sheet open={!!(narrow && sheet && one && !xfer)} onOpenChange={setSheet}>
         <SheetContent side="bottom" className="glass max-h-[80svh] overflow-auto">
           <SheetHeader><SheetTitle>详细信息</SheetTitle></SheetHeader>
           {one ? <InspectorBody file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => void s.removeKeys([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
@@ -442,7 +463,7 @@ export function Drive() {
       </Dialog>
 
       {drop ? <div className="pointer-events-none fixed inset-0 z-50 grid animate-in place-items-center bg-background/55 fade-in-0 backdrop-blur-md duration-150"><div className="glass rounded-2xl border border-dashed border-foreground/25 px-16 py-12 text-center shadow-sm"><div className="text-lg font-semibold">松开即上传</div><div className="mt-1 text-sm text-muted-foreground">文件会按类型放进图片、视频或其他</div></div></div> : null}
-      <Transfer items={queue} summary={summary} folded={folded} setFolded={setFolded} />
+      {!xfer ? <Transfer items={queue} summary={summary} folded={folded} setFolded={setFolded} /> : null}
     </div>
   )
 }
@@ -699,6 +720,49 @@ function getHistSafe() {
   return useDrive.getState().history()
 }
 
+function TransferPage({ items, summary }: { items: QueueItem[]; summary: ReturnType<typeof queueSummary> }) {
+  return (
+    <div className="mx-auto w-full max-w-2xl p-4">
+      {!items.length ? (
+        <div className="grid min-h-[40vh] place-items-center text-center">
+          <div>
+            <div className="mx-auto mb-3 grid size-12 place-items-center rounded-2xl bg-muted text-muted-foreground"><ArrowDownUp className="size-5" /></div>
+            <div className="text-sm font-medium">没有传输任务</div>
+            <p className="mt-1.5 text-xs text-muted-foreground">上传的文件会列在这里，可以暂停、继续或取消</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-sm font-medium">{summary.title}</div>
+            {!summary.active ? <Button size="sm" variant="outline" onClick={clearFinished}>清空已结束</Button> : null}
+          </div>
+          <Progress value={summary.agg} className="mb-3 h-1" />
+          <div className="space-y-2">
+            {items.map((it) => <TaskRow key={it.id} item={it} />)}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function TaskRow({ item: it }: { item: QueueItem }) {
+  return (
+    <div className="rounded-lg border bg-card/60 p-3">
+      <div className="truncate text-sm">{it.file.name}</div>
+      <div className={`mt-0.5 text-xs ${it.tone === 'err' ? 'text-destructive' : it.tone === 'ok' ? 'text-emerald-600' : 'text-muted-foreground'}`}>{it.text}</div>
+      <Progress value={it.pct} className="mt-2 h-1" />
+      <div className="mt-2 flex gap-1">
+        {it.state === 'uploading' ? <><Button size="xs" variant="outline" onClick={() => pauseItem(it)}>暂停</Button><Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button></> : null}
+        {it.state === 'paused' ? <><Button size="xs" onClick={() => resumeItem(it)}>继续</Button><Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button></> : null}
+        {it.state === 'queued' ? <Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button> : null}
+        {(it.state === 'done' || it.state === 'err') ? <Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>移除</Button> : null}
+      </div>
+    </div>
+  )
+}
+
 function Transfer({ items, summary, folded, setFolded }: { items: QueueItem[]; summary: ReturnType<typeof queueSummary>; folded: boolean; setFolded: (v: boolean) => void }) {
   if (!items.length) return null
   return (
@@ -710,20 +774,8 @@ function Transfer({ items, summary, folded, setFolded }: { items: QueueItem[]; s
       <Progress value={summary.agg} className="h-0.5 rounded-none" />
       {!folded ? (
         <div className="max-h-80 space-y-2 overflow-auto p-2">
-          {items.map((it) => (
-            <div key={it.id} className="rounded-lg bg-muted/50 p-2">
-              <div className="truncate text-sm">{it.file.name}</div>
-              <div className={`text-xs ${it.tone === 'err' ? 'text-destructive' : it.tone === 'ok' ? 'text-emerald-600' : 'text-muted-foreground'}`}>{it.text}</div>
-              <Progress value={it.pct} className="mt-1 h-1" />
-              <div className="mt-1 flex gap-1">
-                {it.state === 'uploading' ? <><Button size="xs" variant="outline" onClick={() => pauseItem(it)}>暂停</Button><Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button></> : null}
-                {it.state === 'paused' ? <><Button size="xs" onClick={() => resumeItem(it)}>继续</Button><Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button></> : null}
-                {it.state === 'queued' ? <Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button> : null}
-                {(it.state === 'done' || it.state === 'err') ? <Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>移除</Button> : null}
-              </div>
-            </div>
-          ))}
-          {!summary.active ? <Button size="sm" variant="ghost" onClick={clearFinished}>清空</Button> : null}
+          {items.map((it) => <TaskRow key={it.id} item={it} />)}
+          {!summary.active ? <Button size="sm" variant="ghost" onClick={clearFinished}>清空已结束</Button> : null}
         </div>
       ) : null}
     </div>
