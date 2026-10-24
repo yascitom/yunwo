@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 import QRCode from 'qrcode'
 import {
@@ -47,23 +47,60 @@ function IconTip({ label, children }: { label: string; children: React.ReactElem
 }
 
 function navClass(active: boolean, over = false) {
-  return `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors duration-150 ${active ? 'file-selected font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'} ${over ? 'ring-1 ring-foreground/15' : ''}`
+  return `flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm ${active ? 'file-selected font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'} ${over ? 'ring-1 ring-foreground/15' : ''}`
+}
+
+const askDeleteRef: { current: (keys: string[], quiet?: boolean) => void } = { current: () => {} }
+const clearArmedRef: { current: () => void } = { current: () => {} }
+
+function openFile(f: CloudFile) {
+  const t = f.type || fileTypeOf(f.key)
+  if (t === 'image' || t === 'video') useDrive.getState().openLight(f)
+  else window.open(f.url, '_blank', 'noopener,noreferrer')
+}
+
+async function copyFiles(files: CloudFile[], fmt?: LinkFmt) {
+  const useFmt = fmt || useDrive.getState().fmt
+  const text = files.map((f) => formatLink(f, useFmt)).join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success((useFmt === 'url' ? '链接' : useFmt) + '已复制')
+  } catch { toast.error('复制失败') }
+}
+
+function downloadFile(f: CloudFile) {
+  const a = document.createElement('a')
+  a.href = f.url
+  a.download = fileNameOf(f.key)
+  a.target = '_blank'
+  a.rel = 'noreferrer'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  toast.success('已发起下载')
+}
+
+function stepLight(d: number) {
+  const st = useDrive.getState()
+  if (!st.light) return
+  const visible = visibleFiles(st)
+  const i = visible.findIndex((f) => f.key === st.light!.key)
+  if (i < 0) return
+  st.openLight(visible[(i + d + visible.length) % visible.length])
+}
+
+function oneFile(s: { selected: string[]; files: CloudFile[] }) {
+  if (s.selected.length !== 1) return null
+  return s.files.find((f) => f.key === s.selected[0]) || null
 }
 
 export function Drive() {
   const s = useDrive()
   const narrow = useNarrow()
   const { theme, setTheme } = useTheme()
-  const queue = useQueue()
-  const summary = queueSummary()
   const [menu, setMenu] = useState<{ x: number; y: number; file: CloudFile } | null>(null)
   const [sheet, setSheet] = useState(false)
   const [drop, setDrop] = useState(false)
-  const [folded, setFolded] = useState(false)
-  const [settings, setSettings] = useState(false)
-  const [keep, setKeep] = useState(() => localStorage.getItem('yunwo_keepname') !== '0')
-  const [webp, setWebp] = useState(() => localStorage.getItem('yunwo_webp') === '1')
-  const [quality, setQuality] = useState(() => Number(localStorage.getItem('yunwo_quality') || '82'))
   const [conflict, setConflict] = useState<{ name: string; resolve: (v: string | null) => void } | null>(null)
   const [conflictInput, setConflictInput] = useState('')
   const [qr, setQr] = useState<{ url: string; img: string } | null>(null)
@@ -73,11 +110,19 @@ export function Drive() {
   const [dropDir, setDropDir] = useState<DirId | null>(null)
   const [xfer, setXfer] = useState(false)
   const conflictRef = useRef<{ name: string; resolve: (v: string | null) => void } | null>(null)
-  const running = summary.count - summary.done - summary.fail
+  const armedRef = useRef(false)
+  const dragging = useRef<string[]>([])
+  armedRef.current = armed
 
-  const visible = useMemo(() => visibleFiles(s), [s])
-  const one = s.selected.length === 1 ? s.files.find((f) => f.key === s.selected[0]) || null : null
+  const visible = useMemo(() => visibleFiles({ files: s.files, query: s.query, sort: s.sort }), [s.files, s.query, s.sort])
+  const one = oneFile(s)
   const browsing = !xfer && !s.recent
+  const narrowRef = useRef(narrow)
+  const visibleRef = useRef(visible)
+  const uiRef = useRef({ menu, qr: null as { url: string; img: string } | null, conflict, sheet, side: false, browsing })
+  narrowRef.current = narrow
+  visibleRef.current = visible
+  uiRef.current = { menu, qr, conflict, sheet, side, browsing }
 
   useEffect(() => { void s.load(false) }, [])
   useEffect(() => {
@@ -103,7 +148,10 @@ export function Drive() {
     }
   }, [])
 
-  useEffect(() => { setArmed(false) }, [s.selected])
+  useEffect(() => {
+    armedRef.current = false
+    setArmed(false)
+  }, [s.selected])
 
   useEffect(() => {
     const meta = document.querySelector('meta[name="theme-color"]')
@@ -121,17 +169,11 @@ export function Drive() {
       e.preventDefault()
       depth = 0
       setDrop(false)
-      if (e.dataTransfer?.files.length) {
-        enqueue([...e.dataTransfer.files])
-        setFolded(false)
-      }
+      if (e.dataTransfer?.files.length) enqueue([...e.dataTransfer.files])
     }
     const paste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.items || [])].filter((i) => i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean) as File[]
-      if (files.length) {
-        enqueue(files)
-        setFolded(false)
-      }
+      if (files.length) enqueue(files)
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragleave', leave)
@@ -149,44 +191,58 @@ export function Drive() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const ui = uiRef.current
+      const st = useDrive.getState()
       const tag = (document.activeElement?.tagName || '')
       const typing = tag === 'INPUT' || tag === 'TEXTAREA'
       if (e.key === 'Escape') {
-        if (menu) { setMenu(null); return }
-        if (qr) { setQr(null); return }
-        if (s.renameFor || conflict) return
-        if (s.light) { s.openLight(null); return }
-        if (sheet) { setSheet(false); return }
-        if (side) { setSide(false); return }
+        if (ui.menu) { setMenu(null); return }
+        if (ui.qr) { setQr(null); return }
+        if (st.renameFor || ui.conflict) return
+        if (st.light) { st.openLight(null); return }
+        if (ui.sheet) { setSheet(false); return }
+        if (ui.side) { setSide(false); return }
+        armedRef.current = false
         setArmed(false)
-        s.clearSel()
+        st.clearSel()
         return
       }
-      if (typing || !browsing) return
+      if (typing || !ui.browsing) return
+      const current = oneFile(st)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
-        s.selectAll(visible.map((f) => f.key))
-      } else if (e.key === 'Delete' && s.selected.length && !s.light && !s.renameFor && !conflict) {
-        askDelete(s.selected)
-      } else if (e.key === 'Enter' && one && !s.light) {
-        openFile(one)
-      } else if (s.light && e.key === 'ArrowRight') step(1)
-      else if (s.light && e.key === 'ArrowLeft') step(-1)
+        st.selectAll(visibleRef.current.map((f) => f.key))
+      } else if (e.key === 'Delete' && st.selected.length && !st.light && !st.renameFor && !ui.conflict) {
+        askDeleteRef.current(st.selected)
+      } else if (e.key === 'Enter' && current && !st.light) {
+        openFile(current)
+      } else if (st.light && e.key === 'ArrowRight') stepLight(1)
+      else if (st.light && e.key === 'ArrowLeft') stepLight(-1)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  })
+  }, [])
 
-  function askDelete(keys: string[], quiet = false) {
+  const askDelete = useCallback((keys: string[], quiet = false) => {
     if (!keys.length) return
-    if (!armed) {
+    if (!armedRef.current) {
+      armedRef.current = true
       setArmed(true)
-      window.setTimeout(() => setArmed(false), 3000)
+      window.setTimeout(() => {
+        armedRef.current = false
+        setArmed(false)
+      }, 3000)
       if (!quiet) toast.message(`再按 Delete 或再点「删除」确认（${keys.length} 个）`)
       return
     }
+    armedRef.current = false
     setArmed(false)
-    void s.removeKeys(keys)
+    void useDrive.getState().removeKeys(keys)
+  }, [])
+  askDeleteRef.current = askDelete
+  clearArmedRef.current = () => {
+    armedRef.current = false
+    setArmed(false)
   }
   function resolveConflict(v: string | null) {
     const open = conflictRef.current || conflict
@@ -196,56 +252,39 @@ export function Drive() {
     setConflict(null)
   }
 
-  function step(d: number) {
-    if (!s.light) return
-    const i = visible.findIndex((f) => f.key === s.light!.key)
-    if (i < 0) return
-    s.openLight(visible[(i + d + visible.length) % visible.length])
-  }
-  function openFile(f: CloudFile) {
-    const t = f.type || fileTypeOf(f.key)
-    if (t === 'image' || t === 'video') s.openLight(f)
-    else window.open(f.url, '_blank', 'noopener,noreferrer')
-  }
-  async function copy(files: CloudFile[], fmt = s.fmt) {
-    const text = files.map((f) => formatLink(f, fmt)).join('\n')
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success((fmt === 'url' ? '链接' : fmt) + '已复制')
-    } catch { toast.error('复制失败') }
-  }
+  const onRowClick = useCallback((e: React.MouseEvent, f: CloudFile) => {
+    if ((e.target as HTMLElement).closest('[data-stop]')) return
+    if (e.detail > 1) return
+    const st = useDrive.getState()
+    const multi = e.shiftKey || e.ctrlKey || e.metaKey
+    if (narrowRef.current && !multi) {
+      if (st.selected.length === 1 && st.selected[0] === f.key) { st.clearSel(); setSheet(false); return }
+      st.selectOnly(f.key)
+      setSheet(true)
+      return
+    }
+    if (e.shiftKey) st.selectRange(f.key, visibleRef.current.map((x) => x.key))
+    else if (e.ctrlKey || e.metaKey) st.toggleKey(f.key)
+    else if (st.selected.length === 1 && st.selected[0] === f.key) st.clearSel()
+    else st.selectOnly(f.key)
+  }, [])
+  const onDouble = useCallback((f: CloudFile) => openFile(f), [])
+  const onCheck = useCallback((key: string) => useDrive.getState().toggleKey(key), [])
+  const onMenu = useCallback((e: React.MouseEvent, f: CloudFile) => {
+    e.preventDefault()
+    useDrive.getState().selectOnly(f.key)
+    setMenu({ x: e.clientX, y: e.clientY, file: f })
+  }, [])
+  const onDragStart = useCallback((f: CloudFile) => {
+    const sel = useDrive.getState().selected
+    dragging.current = sel.includes(f.key) ? [...sel] : [f.key]
+  }, [])
+  const onUpload = useCallback(() => { document.getElementById('file-pick')?.click() }, [])
   async function showQr(url: string) {
     const img = await QRCode.toDataURL(url, { margin: 1, width: 280, errorCorrectionLevel: 'M' })
     setQr({ url, img })
   }
-  function download(f: CloudFile) {
-    const a = document.createElement('a')
-    a.href = f.url
-    a.download = fileNameOf(f.key)
-    a.target = '_blank'
-    a.rel = 'noreferrer'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    toast.success('已发起下载')
-  }
-  function onRowClick(e: React.MouseEvent, f: CloudFile) {
-    if ((e.target as HTMLElement).closest('[data-stop]')) return
-    if (e.detail > 1) return
-    const multi = e.shiftKey || e.ctrlKey || e.metaKey
-    if (narrow && !multi) {
-      if (s.selected.length === 1 && s.selected[0] === f.key) { s.clearSel(); setSheet(false); return }
-      s.selectOnly(f.key)
-      setSheet(true)
-      return
-    }
-    if (e.shiftKey) s.selectRange(f.key, visible.map((x) => x.key))
-    else if (e.ctrlKey || e.metaKey) s.toggleKey(f.key)
-    else if (s.selected.length === 1 && s.selected[0] === f.key) s.clearSel()
-    else s.selectOnly(f.key)
-  }
 
-  const dragging = useRef<string[]>([])
   const barRef = useRef<HTMLElement>(null)
   const [barH, setBarH] = useState(56)
   useEffect(() => {
@@ -295,7 +334,7 @@ export function Drive() {
           <p className="px-2.5 pt-4 pb-1 text-[11px] font-medium text-muted-foreground">传输</p>
           <button type="button" className={navClass(xfer)} onClick={() => { setXfer(true); s.setRecent(false); s.clearSel(); setArmed(false); setSide(false); setSheet(false) }}>
             <ArrowDownUp className="size-4" /> 传输
-            {running > 0 ? <span className="ml-auto rounded-full bg-foreground px-1.5 text-[10px] font-medium text-background tabular-nums">{running}</span> : summary.count > 0 ? <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{summary.count}</span> : null}
+            <QueueBadge />
           </button>
           <p className="px-2.5 pt-4 pb-1 text-[11px] font-medium text-muted-foreground">本地</p>
           <button type="button" className={navClass(s.recent && !xfer)} onClick={() => { setXfer(false); s.setRecent(true); s.clearSel(); setArmed(false); setSide(false); setSheet(false) }}>
@@ -349,60 +388,18 @@ export function Drive() {
           </div> : null}
           {xfer ? (
             <div className="ml-auto">
-              <Button onClick={() => document.getElementById('file-pick')?.click()}><Upload /> 上传</Button>
-            </div>
-          ) : s.selected.length === 0 ? (
-            <div className="ml-auto flex flex-wrap items-center gap-1.5">
-              <Select value={s.sort} onValueChange={(v) => s.setSort(v as typeof s.sort)}>
-                <SelectTrigger className="h-8 w-[118px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="time_desc">最新上传</SelectItem>
-                  <SelectItem value="time_asc">最早上传</SelectItem>
-                  <SelectItem value="size_desc">文件最大</SelectItem>
-                  <SelectItem value="size_asc">文件最小</SelectItem>
-                  <SelectItem value="name_asc">名称 A-Z</SelectItem>
-                  <SelectItem value="name_desc">名称 Z-A</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="flex rounded-lg bg-background/40 p-0.5">
-                <IconTip label="列表"><Button variant={s.view === 'list' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => s.setView('list')} aria-label="列表" aria-pressed={s.view === 'list'}><Rows3 /></Button></IconTip>
-                <IconTip label="平铺"><Button variant={s.view === 'grid' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => s.setView('grid')} aria-label="平铺" aria-pressed={s.view === 'grid'}><LayoutGrid /></Button></IconTip>
-                <IconTip label="瀑布流"><Button variant={s.view === 'fall' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => s.setView('fall')} aria-label="瀑布流" aria-pressed={s.view === 'fall'}><Columns2 /></Button></IconTip>
-              </div>
-              <IconTip label="刷新">
-                <Button variant="ghost" size="icon" onClick={() => void s.load(false)} aria-label="刷新"><RefreshCw className={s.loading ? 'animate-spin' : ''} /></Button>
-              </IconTip>
-              <DropdownMenu open={settings} onOpenChange={setSettings}>
-                <div className="flex">
-                  <Button className="rounded-r-none" onClick={() => document.getElementById('file-pick')?.click()}><Upload /> 上传</Button>
-                  <DropdownMenuTrigger asChild>
-                    <Button className="w-8 rounded-l-none border-l border-primary-foreground/15 px-0" aria-label="上传设置"><ChevronDown /></Button>
-                  </DropdownMenuTrigger>
-                </div>
-                <DropdownMenuContent align="end" className="w-72 p-3">
-                  <div className="mb-2 text-xs font-medium">上传设置</div>
-                  <label className="flex items-center justify-between gap-3 py-1 text-sm">保留原文件名 <Toggle checked={keep} onCheckedChange={(v) => { setKeep(!!v); localStorage.setItem('yunwo_keepname', v ? '1' : '0') }} /></label>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">同名时会提示重命名，或自动加编码继续</p>
-                  <label className="mt-3 flex items-center justify-between gap-3 py-1 text-sm">图片压缩为 WebP <Toggle checked={webp} onCheckedChange={(v) => { setWebp(!!v); localStorage.setItem('yunwo_webp', v ? '1' : '0') }} /></label>
-                  {webp ? <div className="mt-3"><div className="mb-2 text-xs text-muted-foreground">画质 {quality}%</div><Slider value={[quality]} min={10} max={100} onValueChange={(v) => { const n = v[0] ?? 82; setQuality(n); localStorage.setItem('yunwo_quality', String(n)) }} /></div> : null}
-                  <p className="mt-3 text-xs leading-relaxed text-muted-foreground">单文件最大 {getMaxSizeMB()} MB · 大文件分片，可断点续传</p>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button onClick={onUpload}><Upload /> 上传</Button>
             </div>
           ) : (
-            <div className="ml-auto flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-muted-foreground tabular-nums">已选 {s.selected.length} 项</span>
-              <Button size="sm" variant="outline" onClick={() => s.selectAll(visible.map((f) => f.key))}>全选</Button>
-              <Button size="sm" variant="outline" onClick={() => s.invert(visible.map((f) => f.key))}>反选</Button>
-              <Button size="sm" variant="outline" onClick={() => void copy(s.files.filter((f) => s.selected.includes(f.key)))}>复制链接</Button>
-              <Button size="sm" variant="destructive" onClick={() => askDelete(s.selected, true)}>{armed ? `再点确认删除 ${s.selected.length} 个` : '删除'}</Button>
-              <Button size="sm" variant="ghost" onClick={() => { setArmed(false); s.clearSel() }}>取消</Button>
-            </div>
+            <>
+              <BrowseTools />
+              <SelectionTools armed={armed} ask={askDelete} />
+            </>
           )}
-          <input id="file-pick" type="file" multiple hidden onChange={(e) => { enqueue([...(e.target.files || [])]); setFolded(false); e.target.value = '' }} />
+          <input id="file-pick" type="file" multiple hidden onChange={(e) => { enqueue([...(e.target.files || [])]); e.target.value = '' }} />
         </header>
 
-          {xfer ? <TransferPage items={queue} summary={summary} /> : s.recent ? <Recent /> : s.loading ? (
+          {xfer ? <TransferPage /> : s.recent ? <Recent /> : s.loading ? (
             <div className="px-3 py-2">
               {Array.from({ length: 8 }, (_, i) => (
                 <div key={i} className="flex h-12 items-center gap-3">
@@ -416,24 +413,19 @@ export function Drive() {
             <FileView
               view={s.view}
               files={visible}
-              selected={s.selected}
               hint={s.hint}
               query={s.query}
-              onUpload={() => document.getElementById('file-pick')?.click()}
+              onUpload={onUpload}
               onClick={onRowClick}
-              onDouble={(f) => openFile(f)}
-              onCheck={(key) => s.toggleKey(key)}
-              onMenu={(e, f) => { e.preventDefault(); s.selectOnly(f.key); setMenu({ x: e.clientX, y: e.clientY, file: f }) }}
-              onDragStart={(f) => { dragging.current = s.selected.includes(f.key) ? [...s.selected] : [f.key] }}
+              onDouble={onDouble}
+              onCheck={onCheck}
+              onMenu={onMenu}
+              onDragStart={onDragStart}
               stickyTop={barH}
             />
           )}
         </div>
-        {xfer ? (
-          <footer className="glass-bar flex h-9 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
-            <span className="tabular-nums">{summary.count ? summary.title : '没有传输任务'}</span>
-          </footer>
-        ) : !s.recent ? (
+        {xfer ? <QueueFooter /> : !s.recent ? (
           <footer className="glass-bar flex h-9 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
             <span className="tabular-nums">{s.query ? `筛选出 ${visible.length} / 共 ${s.files.length}` : `${s.files.length} 个文件`}</span>
             {s.hint && s.files.length ? <span className="truncate text-amber-700 dark:text-amber-300">{s.hint}</span> : null}
@@ -442,12 +434,12 @@ export function Drive() {
         ) : null}
       </div>
 
-      {one && !narrow && browsing ? <Inspector file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => askDelete([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
+      <DeskInspector active={!!one && !narrow && browsing} onQr={(url) => void showQr(url)} onRename={(f) => { setRenameName(fileNameOf(f.key)); s.setRenameFor(f) }} onDelete={(key) => askDelete([key])} />
 
       <Sheet open={!!(narrow && sheet && one && browsing)} onOpenChange={setSheet}>
         <SheetContent side="bottom" className="glass max-h-[80svh] overflow-auto">
           <SheetHeader><SheetTitle>详细信息</SheetTitle></SheetHeader>
-          {one ? <InspectorBody file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copy([one], f) }} onOpen={() => openFile(one)} onDown={() => download(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => askDelete([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
+          {one ? <InspectorBody file={one} fmt={s.fmt} onFmt={(f) => { s.setFmt(f); void copyFiles([one], f) }} onOpen={() => openFile(one)} onDown={() => downloadFile(one)} onQr={() => void showQr(one.url)} onRename={() => { setRenameName(fileNameOf(one.key)); s.setRenameFor(one) }} onDelete={() => askDelete([one.key])} onMove={(d) => void s.move([one.key], d)} /> : null}
         </SheetContent>
       </Sheet>
 
@@ -455,8 +447,8 @@ export function Drive() {
       {menu ? (
         <div className="glass fixed z-50 min-w-44 origin-top-left animate-in rounded-xl border p-1 text-sm shadow-lg fade-in-0 duration-100" style={{ left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 320) }}>
           <MenuBtn onClick={() => { openFile(menu.file); setMenu(null) }}>打开</MenuBtn>
-          {(['url', 'md', 'html', 'bbcode'] as LinkFmt[]).map((f) => <MenuBtn key={f} onClick={() => { s.setFmt(f); void copy(s.selected.length > 1 ? s.files.filter((x) => s.selected.includes(x.key)) : [menu.file], f); setMenu(null) }}>复制 {f.toUpperCase()}</MenuBtn>)}
-          <MenuBtn onClick={() => { download(menu.file); setMenu(null) }}>下载</MenuBtn>
+          {(['url', 'md', 'html', 'bbcode'] as LinkFmt[]).map((f) => <MenuBtn key={f} onClick={() => { s.setFmt(f); void copyFiles(s.selected.length > 1 ? s.files.filter((x) => s.selected.includes(x.key)) : [menu.file], f); setMenu(null) }}>复制 {f.toUpperCase()}</MenuBtn>)}
+          <MenuBtn onClick={() => { downloadFile(menu.file); setMenu(null) }}>下载</MenuBtn>
           <MenuBtn onClick={() => { void showQr(menu.file.url); setMenu(null) }}>二维码</MenuBtn>
           <MenuBtn onClick={() => { setRenameName(fileNameOf(menu.file.key)); s.setRenameFor(menu.file); setMenu(null) }}>重命名</MenuBtn>
           <div className="my-1 h-px bg-border" />
@@ -474,9 +466,9 @@ export function Drive() {
           {s.light ? <Preview file={s.light} /> : null}
           <p className="text-xs leading-relaxed break-all text-muted-foreground">{s.light ? `${s.light.key} · ${sizeText(s.light.size)} · ${fmtTime(s.light.time)}` : ''}</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => step(-1)}>上一个</Button>
-            <Button variant="outline" onClick={() => step(1)}>下一个</Button>
-            {s.light ? <Button onClick={() => void copy([s.light!])}>复制链接</Button> : null}
+            <Button variant="outline" onClick={() => stepLight(-1)}>上一个</Button>
+            <Button variant="outline" onClick={() => stepLight(1)}>下一个</Button>
+            {s.light ? <Button onClick={() => void copyFiles([s.light!])}>复制链接</Button> : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -523,28 +515,91 @@ export function Drive() {
       </Dialog>
 
       {drop ? <div className="pointer-events-none fixed inset-0 z-50 grid animate-in place-items-center bg-background/55 fade-in-0 backdrop-blur-md duration-150"><div className="glass rounded-2xl border border-dashed border-foreground/25 px-16 py-12 text-center shadow-sm"><div className="text-lg font-semibold">松开即上传</div><div className="mt-1 text-sm text-muted-foreground">文件会按类型放进图片、视频或其他</div></div></div> : null}
-      {!xfer ? <Transfer items={queue} summary={summary} folded={folded} setFolded={setFolded} /> : null}
+      {!xfer ? <Transfer /> : null}
     </div>
   )
 }
 
+const BrowseTools = memo(function BrowseTools() {
+  const sort = useDrive((st) => st.sort)
+  const view = useDrive((st) => st.view)
+  const loading = useDrive((st) => st.loading)
+  const count = useDrive((st) => st.selected.length)
+  const [settings, setSettings] = useState(false)
+  const [keep, setKeep] = useState(() => localStorage.getItem('yunwo_keepname') !== '0')
+  const [webp, setWebp] = useState(() => localStorage.getItem('yunwo_webp') === '1')
+  const [quality, setQuality] = useState(() => Number(localStorage.getItem('yunwo_quality') || '82'))
+  return (
+    <div className={count === 0 ? 'ml-auto flex flex-wrap items-center gap-1.5' : 'hidden'}>
+      <Select value={sort} onValueChange={(v) => useDrive.getState().setSort(v as typeof sort)}>
+        <SelectTrigger className="h-8 w-[118px]"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="time_desc">最新上传</SelectItem>
+          <SelectItem value="time_asc">最早上传</SelectItem>
+          <SelectItem value="size_desc">文件最大</SelectItem>
+          <SelectItem value="size_asc">文件最小</SelectItem>
+          <SelectItem value="name_asc">名称 A-Z</SelectItem>
+          <SelectItem value="name_desc">名称 Z-A</SelectItem>
+        </SelectContent>
+      </Select>
+      <div className="flex rounded-lg bg-background/40 p-0.5">
+        <IconTip label="列表"><Button variant={view === 'list' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => useDrive.getState().setView('list')} aria-label="列表" aria-pressed={view === 'list'}><Rows3 /></Button></IconTip>
+        <IconTip label="平铺"><Button variant={view === 'grid' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => useDrive.getState().setView('grid')} aria-label="平铺" aria-pressed={view === 'grid'}><LayoutGrid /></Button></IconTip>
+        <IconTip label="瀑布流"><Button variant={view === 'fall' ? 'secondary' : 'ghost'} size="icon-sm" onClick={() => useDrive.getState().setView('fall')} aria-label="瀑布流" aria-pressed={view === 'fall'}><Columns2 /></Button></IconTip>
+      </div>
+      <IconTip label="刷新">
+        <Button variant="ghost" size="icon" onClick={() => void useDrive.getState().load(false)} aria-label="刷新"><RefreshCw className={loading ? 'animate-spin' : ''} /></Button>
+      </IconTip>
+      <DropdownMenu open={settings} onOpenChange={setSettings}>
+        <div className="flex">
+          <Button className="rounded-r-none" onClick={() => document.getElementById('file-pick')?.click()}><Upload /> 上传</Button>
+          <DropdownMenuTrigger asChild>
+            <Button className="w-8 rounded-l-none border-l border-primary-foreground/15 px-0" aria-label="上传设置"><ChevronDown /></Button>
+          </DropdownMenuTrigger>
+        </div>
+        <DropdownMenuContent align="end" className="w-72 p-3">
+          <div className="mb-2 text-xs font-medium">上传设置</div>
+          <label className="flex items-center justify-between gap-3 py-1 text-sm">保留原文件名 <Toggle checked={keep} onCheckedChange={(v) => { setKeep(!!v); localStorage.setItem('yunwo_keepname', v ? '1' : '0') }} /></label>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">同名时会提示重命名，或自动加编码继续</p>
+          <label className="mt-3 flex items-center justify-between gap-3 py-1 text-sm">图片压缩为 WebP <Toggle checked={webp} onCheckedChange={(v) => { setWebp(!!v); localStorage.setItem('yunwo_webp', v ? '1' : '0') }} /></label>
+          {webp ? <div className="mt-3"><div className="mb-2 text-xs text-muted-foreground">画质 {quality}%</div><Slider value={[quality]} min={10} max={100} onValueChange={(v) => { const n = v[0] ?? 82; setQuality(n); localStorage.setItem('yunwo_quality', String(n)) }} /></div> : null}
+          <p className="mt-3 text-xs leading-relaxed text-muted-foreground">单文件最大 {getMaxSizeMB()} MB · 大文件分片，可断点续传</p>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+})
+
+const SelectionTools = memo(function SelectionTools({ armed, ask }: { armed: boolean; ask: (keys: string[], quiet?: boolean) => void }) {
+  const count = useDrive((st) => st.selected.length)
+  return (
+    <div className={count > 0 ? 'ml-auto flex flex-wrap items-center gap-1.5' : 'hidden'}>
+      <span className="text-xs text-muted-foreground tabular-nums">已选 {count} 项</span>
+      <Button size="sm" variant="outline" onClick={() => { const st = useDrive.getState(); st.selectAll(visibleFiles(st).map((f) => f.key)) }}>全选</Button>
+      <Button size="sm" variant="outline" onClick={() => { const st = useDrive.getState(); st.invert(visibleFiles(st).map((f) => f.key)) }}>反选</Button>
+      <Button size="sm" variant="outline" onClick={() => { const st = useDrive.getState(); void copyFiles(st.files.filter((f) => st.selected.includes(f.key))) }}>复制链接</Button>
+      <Button size="sm" variant="destructive" onClick={() => ask(useDrive.getState().selected, true)}>{armed ? `再点确认删除 ${count} 个` : '删除'}</Button>
+      <Button size="sm" variant="ghost" onClick={() => { clearArmedRef.current(); useDrive.getState().clearSel() }}>取消</Button>
+    </div>
+  )
+})
+
 function MenuBtn({ children, onClick, disabled, className = '' }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; className?: string }) {
-  return <button type="button" disabled={disabled} onClick={onClick} className={`flex h-8 w-full items-center rounded-md px-2 text-left transition-colors duration-150 hover:bg-muted disabled:opacity-40 ${className}`}>{children}</button>
+  return <button type="button" disabled={disabled} onClick={onClick} className={`flex h-8 w-full items-center rounded-md px-2 text-left hover:bg-muted disabled:opacity-40 ${className}`}>{children}</button>
 }
 
 function Preview({ file }: { file: CloudFile }) {
   const t = file.type || fileTypeOf(file.key)
-  if (t === 'image') return <div className="grid max-h-[68vh] place-items-center overflow-hidden rounded-lg bg-muted"><img src={file.url} alt="" className="max-h-[68vh] w-full object-contain" /></div>
+  if (t === 'image') return <div className="grid max-h-[68vh] place-items-center overflow-hidden rounded-lg bg-muted"><img src={file.url} alt="" decoding="async" className="max-h-[68vh] w-full object-contain" /></div>
   if (t === 'video') return <video src={file.url} controls className="max-h-[68vh] w-full rounded-lg bg-black" />
   return <div className="grid place-items-center rounded-lg border bg-muted/40 py-16 text-sm">{fileNameOf(file.key)}</div>
 }
 
 const LIST_COLS = 'grid grid-cols-[36px_44px_minmax(0,1fr)_32px] items-center sm:grid-cols-[36px_44px_minmax(0,1fr)_88px_32px] lg:grid-cols-[36px_44px_minmax(0,1fr)_88px_148px_32px]'
 
-function FileView(props: {
+const FileView = memo(function FileView(props: {
   view: 'list' | 'grid' | 'fall'
   files: CloudFile[]
-  selected: string[]
   hint: string
   query: string
   onUpload: () => void
@@ -575,72 +630,93 @@ function FileView(props: {
   if (props.view === 'list') {
     return (
       <div className="min-w-0 px-1">
-        <div className={`${LIST_COLS} glass-bar sticky z-10 border-b px-2 text-[11px] text-muted-foreground`} style={{ top: props.stickyTop }}>
+        <div className={`${LIST_COLS} sticky z-10 border-b bg-background px-2 text-[11px] text-muted-foreground`} style={{ top: props.stickyTop }}>
           <span /><span /><span className="py-2">名称</span>
           <span className="hidden py-2 text-right sm:block">大小</span>
           <span className="hidden py-2 text-right lg:block">修改时间</span>
           <span />
         </div>
-        {props.files.map((f) => {
-          const on = props.selected.includes(f.key)
-          return (
-            <div
-              key={f.key}
-              data-file
-              draggable
-              onDragStart={() => props.onDragStart(f)}
-              onClick={(e) => props.onClick(e, f)}
-              onDoubleClick={() => props.onDouble(f)}
-              onContextMenu={(e) => props.onMenu(e, f)}
-              className={`${LIST_COLS} group min-h-12 border-b border-border/70 px-2 py-2 text-sm transition-colors duration-150 last:border-b-0 ${on ? 'file-selected' : 'hover:bg-muted/70'}`}
-            >
-              <Checkbox data-stop className="justify-self-center" checked={on} onCheckedChange={() => props.onCheck(f.key)} onClick={(e) => e.stopPropagation()} />
-              <Thumb file={f} />
-              <div className="min-w-0 pr-3" title={fileNameOf(f.key)}>
-                <div className="truncate">{fileNameOf(f.key)}</div>
-                <div className="mt-0.5 truncate text-[11px] text-muted-foreground sm:hidden">{sizeText(f.size)} · {fmtTime(f.time)}</div>
-              </div>
-              <div className="hidden text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums sm:block">{sizeText(f.size)}</div>
-              <div className="hidden text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums lg:block">{fmtTime(f.time)}</div>
-              <Button data-stop variant="ghost" size="icon-sm" className="text-muted-foreground" onClick={(e) => { e.stopPropagation(); props.onMenu(e, f) }} aria-label="更多"><MoreHorizontal /></Button>
-            </div>
-          )
-        })}
+        {props.files.map((f) => (
+          <FileRow key={f.key} file={f} onClick={props.onClick} onDouble={props.onDouble} onCheck={props.onCheck} onMenu={props.onMenu} onDragStart={props.onDragStart} />
+        ))}
       </div>
     )
   }
   const fall = props.view === 'fall'
   return (
     <div className={fall ? 'columns-[210px] gap-3 p-4' : 'grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3 p-4'}>
-      {props.files.map((f) => {
-        const on = props.selected.includes(f.key)
-        return (
-          <div
-            key={f.key}
-            data-file
-            draggable
-            onDragStart={() => props.onDragStart(f)}
-            onClick={(e) => props.onClick(e, f)}
-            onDoubleClick={() => props.onDouble(f)}
-            onContextMenu={(e) => props.onMenu(e, f)}
-            className={`group relative rounded-xl ${on ? 'ring-2 ring-[oklch(0.58_0.16_255)]' : ''} ${fall ? 'mb-3 break-inside-avoid' : ''}`}
-          >
-            <div className={`relative overflow-hidden rounded-xl border bg-muted/30 ${on ? 'border-transparent' : ''} ${fall ? '' : 'aspect-square'}`}>
-              <Thumb file={f} mode={fall ? 'natural' : 'cover'} />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2.5 pt-8 text-xs text-white">
-                <div className="truncate">{fileNameOf(f.key)}</div>
-                <div className="mt-0.5 opacity-70 tabular-nums">{sizeText(f.size)}</div>
-              </div>
-              <div className={`glass absolute top-2 left-2 rounded-md p-0.5 shadow-sm ${on ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'}`} data-stop>
-                <Checkbox checked={on} onCheckedChange={() => props.onCheck(f.key)} onClick={(e) => e.stopPropagation()} />
-              </div>
-            </div>
-          </div>
-        )
-      })}
+      {props.files.map((f) => (
+        <FileCard key={f.key} file={f} fall={fall} onClick={props.onClick} onDouble={props.onDouble} onCheck={props.onCheck} onMenu={props.onMenu} onDragStart={props.onDragStart} />
+      ))}
     </div>
   )
-}
+})
+
+const FileRow = memo(function FileRow({ file, onClick, onDouble, onCheck, onMenu, onDragStart }: {
+  file: CloudFile
+  onClick: (e: React.MouseEvent, f: CloudFile) => void
+  onDouble: (f: CloudFile) => void
+  onCheck: (key: string) => void
+  onMenu: (e: React.MouseEvent, f: CloudFile) => void
+  onDragStart: (f: CloudFile) => void
+}) {
+  const on = useDrive((st) => st.selected.includes(file.key))
+  return (
+    <div
+      data-file
+      draggable
+      onDragStart={() => onDragStart(file)}
+      onClick={(e) => onClick(e, file)}
+      onDoubleClick={() => onDouble(file)}
+      onContextMenu={(e) => onMenu(e, file)}
+      className={`${LIST_COLS} file-row group min-h-12 border-b border-border/70 px-2 py-2 text-sm select-none last:border-b-0 ${on ? 'file-selected' : 'hover:bg-muted/70'}`}
+    >
+      <Checkbox data-stop className="justify-self-center transition-none" checked={on} onCheckedChange={() => onCheck(file.key)} onClick={(e) => e.stopPropagation()} />
+      <Thumb file={file} />
+      <div className="min-w-0 pr-3" title={fileNameOf(file.key)}>
+        <div className="truncate">{fileNameOf(file.key)}</div>
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground sm:hidden">{sizeText(file.size)} · {fmtTime(file.time)}</div>
+      </div>
+      <div className="hidden text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums sm:block">{sizeText(file.size)}</div>
+      <div className="hidden text-right text-xs whitespace-nowrap text-muted-foreground tabular-nums lg:block">{fmtTime(file.time)}</div>
+      <Button data-stop variant="ghost" size="icon-sm" className="text-muted-foreground" onClick={(e) => { e.stopPropagation(); onMenu(e, file) }} aria-label="更多"><MoreHorizontal /></Button>
+    </div>
+  )
+})
+
+const FileCard = memo(function FileCard({ file, fall, onClick, onDouble, onCheck, onMenu, onDragStart }: {
+  file: CloudFile
+  fall: boolean
+  onClick: (e: React.MouseEvent, f: CloudFile) => void
+  onDouble: (f: CloudFile) => void
+  onCheck: (key: string) => void
+  onMenu: (e: React.MouseEvent, f: CloudFile) => void
+  onDragStart: (f: CloudFile) => void
+}) {
+  const on = useDrive((st) => st.selected.includes(file.key))
+  return (
+    <div
+      data-file
+      draggable
+      onDragStart={() => onDragStart(file)}
+      onClick={(e) => onClick(e, file)}
+      onDoubleClick={() => onDouble(file)}
+      onContextMenu={(e) => onMenu(e, file)}
+      className={`file-card group relative rounded-xl select-none ${on ? 'ring-2 ring-[oklch(0.58_0.16_255)]' : ''} ${fall ? 'mb-3 break-inside-avoid' : ''}`}
+    >
+      <div className={`relative overflow-hidden rounded-xl border bg-muted/30 ${on ? 'border-transparent' : ''} ${fall ? '' : 'aspect-square'}`}>
+        <Thumb file={file} mode={fall ? 'natural' : 'cover'} />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2.5 pt-8 text-xs text-white">
+          <div className="truncate">{fileNameOf(file.key)}</div>
+          <div className="mt-0.5 opacity-70 tabular-nums">{sizeText(file.size)}</div>
+        </div>
+        <div className={`absolute top-2 left-2 rounded-md bg-background/95 p-0.5 shadow-sm ${on ? 'opacity-100' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100'}`} data-stop>
+          <Checkbox className="transition-none" checked={on} onCheckedChange={() => onCheck(file.key)} onClick={(e) => e.stopPropagation()} />
+        </div>
+      </div>
+    </div>
+  )
+})
 
 function frameSrc(url: string) {
   return url.includes('#') ? url : `${url}#t=0.1`
@@ -663,7 +739,7 @@ function VideoFrame({ url, className }: { url: string; className: string }) {
   )
 }
 
-function Thumb({ file, mode = 'cell' }: { file: CloudFile; mode?: 'cell' | 'cover' | 'natural' }) {
+const Thumb = memo(function Thumb({ file, mode = 'cell' }: { file: CloudFile; mode?: 'cell' | 'cover' | 'natural' }) {
   const t = file.type || fileTypeOf(file.key)
   const ext = (file.key.split('.').pop() || 'file').slice(0, 4).toUpperCase()
   if (t === 'image' && mode === 'natural') return <img src={file.url} alt="" loading="lazy" decoding="async" className="block h-auto w-full" />
@@ -684,6 +760,31 @@ function Thumb({ file, mode = 'cell' }: { file: CloudFile; mode?: 'cell' | 'cove
   }
   const box = mode === 'cell' ? 'grid size-9 place-items-center overflow-hidden rounded-md bg-muted' : mode === 'natural' ? 'grid aspect-[4/3] w-full place-items-center bg-muted' : 'grid h-full w-full place-items-center bg-muted'
   return <div className={`${box} text-[10px] font-medium text-muted-foreground`}>{ext}</div>
+})
+
+function DeskInspector({ active, onQr, onRename, onDelete }: {
+  active: boolean
+  onQr: (url: string) => void
+  onRename: (file: CloudFile) => void
+  onDelete: (key: string) => void
+}) {
+  const fmt = useDrive((st) => st.fmt)
+  const file = useDrive(oneFile)
+  const shown = useDeferredValue(file)
+  if (!active || !shown) return null
+  return (
+    <Inspector
+      file={shown}
+      fmt={fmt}
+      onFmt={(f) => { useDrive.getState().setFmt(f); void copyFiles([shown], f) }}
+      onOpen={() => openFile(shown)}
+      onDown={() => downloadFile(shown)}
+      onQr={() => onQr(shown.url)}
+      onRename={() => onRename(shown)}
+      onDelete={() => onDelete(shown.key)}
+      onMove={(d) => void useDrive.getState().move([shown.key], d)}
+    />
+  )
 }
 
 function Inspector(props: { file: CloudFile } & InspectorActions) {
@@ -709,7 +810,7 @@ function InspectorBody({ file, fmt, onFmt, onOpen, onDown, onQr, onRename, onDel
   return (
     <div className="space-y-4 px-4 pb-6">
       <div className="grid h-40 place-items-center overflow-hidden rounded-xl bg-muted">
-        {t === 'image' ? <img src={file.url} alt="" className="max-h-40 w-full object-contain" /> : t === 'video' ? <VideoFrame url={file.url} className="max-h-40 w-full object-contain" /> : <span className="text-sm text-muted-foreground">文件</span>}
+        {t === 'image' ? <img src={file.url} alt="" decoding="async" className="max-h-40 w-full object-contain" /> : t === 'video' ? <VideoFrame url={file.url} className="max-h-40 w-full object-contain" /> : <span className="text-sm text-muted-foreground">文件</span>}
       </div>
       <div className="text-sm leading-snug font-medium break-all">{fileNameOf(file.key)}</div>
       <dl className="text-xs">
@@ -766,7 +867,7 @@ function Recent() {
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-3">
           {items.map((it) => (
-            <button key={it.url + it.t} type="button" className="overflow-hidden rounded-xl border bg-card text-left transition-colors duration-150 hover:border-foreground/20" onClick={() => navigator.clipboard.writeText(formatLink({ key: it.url, url: it.url, type: fileTypeOf(it.url) }, fmt)).then(() => toast.success('已复制'))}>
+            <button key={it.url + it.t} type="button" className="overflow-hidden rounded-xl border bg-card text-left hover:border-foreground/20" onClick={() => navigator.clipboard.writeText(formatLink({ key: it.url, url: it.url, type: fileTypeOf(it.url) }, fmt)).then(() => toast.success('已复制'))}>
               {fileTypeOf(it.url) === 'image' ? <img src={it.url} alt="" className="aspect-square w-full object-cover" /> : fileTypeOf(it.url) === 'video' ? <VideoFrame url={it.url} className="aspect-square w-full object-cover" /> : <div className="grid aspect-square place-items-center bg-muted text-xs text-muted-foreground">文件</div>}
               <div className="truncate px-2 py-1.5 text-xs">{fileNameOf(it.url)}</div>
             </button>
@@ -780,7 +881,28 @@ function getHistSafe() {
   return useDrive.getState().history()
 }
 
-function TransferPage({ items, summary }: { items: QueueItem[]; summary: ReturnType<typeof queueSummary> }) {
+function QueueBadge() {
+  const items = useQueue()
+  const summary = queueSummary()
+  const running = summary.count - summary.done - summary.fail
+  if (running > 0) return <span className="ml-auto rounded-full bg-foreground px-1.5 text-[10px] font-medium text-background tabular-nums">{running}</span>
+  if (items.length > 0) return <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">{summary.count}</span>
+  return null
+}
+
+function QueueFooter() {
+  const items = useQueue()
+  const summary = queueSummary()
+  return (
+    <footer className="glass-bar flex h-9 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
+      <span className="tabular-nums">{items.length ? summary.title : '没有传输任务'}</span>
+    </footer>
+  )
+}
+
+function TransferPage() {
+  const items = useQueue()
+  const summary = queueSummary()
   const running = summary.count - summary.done - summary.fail
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -897,7 +1019,15 @@ function TaskRow({ item: it, compact = false }: { item: QueueItem; compact?: boo
   )
 }
 
-function Transfer({ items, summary, folded, setFolded }: { items: QueueItem[]; summary: ReturnType<typeof queueSummary>; folded: boolean; setFolded: (v: boolean) => void }) {
+function Transfer() {
+  const items = useQueue()
+  const summary = queueSummary()
+  const [folded, setFolded] = useState(false)
+  const prev = useRef(0)
+  useEffect(() => {
+    if (items.length > prev.current) setFolded(false)
+    prev.current = items.length
+  }, [items.length])
   if (!items.length) return null
   return (
     <div className="glass fixed right-4 bottom-4 z-40 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl border shadow-lg ring-1 ring-foreground/10">
