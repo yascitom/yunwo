@@ -2,16 +2,16 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { toast } from 'sonner'
 import QRCode from 'qrcode'
 import {
-  ArrowDownUp, Box, ChevronDown, ChevronRight, Clock, Cloud, Columns2, Film, Folder, Image as ImageIcon, LayoutGrid, LogOut, Moon, MoreHorizontal,
-  RefreshCw, Rows3, Search, Sun, Upload,
+  ArrowDownUp, Box, ChevronDown, ChevronRight, Clock, Cloud, Columns2, File as FileIcon, Film, Folder, Image as ImageIcon, LayoutGrid, LogOut, Moon, MoreHorizontal,
+  Pause, Play, RefreshCw, Rows3, Search, Sun, Trash2, Upload, X,
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
-import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -721,8 +721,9 @@ function getHistSafe() {
 }
 
 function TransferPage({ items, summary }: { items: QueueItem[]; summary: ReturnType<typeof queueSummary> }) {
+  const running = summary.count - summary.done - summary.fail
   return (
-    <div className="mx-auto w-full max-w-2xl p-4">
+    <div className="mx-auto w-full max-w-3xl px-4 py-6">
       {!items.length ? (
         <div className="grid min-h-[40vh] place-items-center text-center">
           <div>
@@ -733,13 +734,22 @@ function TransferPage({ items, summary }: { items: QueueItem[]; summary: ReturnT
         </div>
       ) : (
         <>
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="text-sm font-medium">{summary.title}</div>
-            {!summary.active ? <Button size="sm" variant="outline" onClick={clearFinished}>清空已结束</Button> : null}
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            <QueueStat label="进行中" value={running} />
+            <QueueStat label="已完成" value={summary.done} />
+            <QueueStat label="失败" value={summary.fail} />
           </div>
-          <Progress value={summary.agg} className="mb-3 h-1" />
-          <div className="space-y-2">
-            {items.map((it) => <TaskRow key={it.id} item={it} />)}
+          <div className="overflow-hidden rounded-xl border bg-card">
+            <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium">{summary.title}</div>
+                <ThinBar value={summary.agg} className="mt-2" tone={summary.fail && !summary.active ? 'err' : 'run'} />
+              </div>
+              {!summary.active ? <Button size="sm" variant="outline" className="shrink-0" onClick={clearFinished}>清空已结束</Button> : null}
+            </div>
+            <div>
+              {items.map((it) => <TaskRow key={it.id} item={it} />)}
+            </div>
           </div>
         </>
       )}
@@ -747,18 +757,82 @@ function TransferPage({ items, summary }: { items: QueueItem[]; summary: ReturnT
   )
 }
 
-function TaskRow({ item: it }: { item: QueueItem }) {
+function QueueStat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border bg-card/60 p-3">
-      <div className="truncate text-sm">{it.file.name}</div>
-      <div className={`mt-0.5 text-xs ${it.tone === 'err' ? 'text-destructive' : it.tone === 'ok' ? 'text-emerald-600' : 'text-muted-foreground'}`}>{it.text}</div>
-      <Progress value={it.pct} className="mt-2 h-1" />
-      <div className="mt-2 flex gap-1">
-        {it.state === 'uploading' ? <><Button size="xs" variant="outline" onClick={() => pauseItem(it)}>暂停</Button><Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button></> : null}
-        {it.state === 'paused' ? <><Button size="xs" onClick={() => resumeItem(it)}>继续</Button><Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button></> : null}
-        {it.state === 'queued' ? <Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>取消</Button> : null}
-        {(it.state === 'done' || it.state === 'err') ? <Button size="xs" variant="ghost" onClick={() => void cancelItem(it)}>移除</Button> : null}
+    <div className="rounded-xl border bg-card px-3 py-2.5">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+function ThinBar({ value, tone, className = '' }: { value: number; tone: 'run' | 'ok' | 'err' | 'wait'; className?: string }) {
+  const fill = tone === 'ok' ? 'bg-emerald-500' : tone === 'err' ? 'bg-destructive' : tone === 'wait' ? 'bg-foreground/25' : 'bg-foreground/80'
+  return (
+    <div className={`h-1 overflow-hidden rounded-full bg-muted ${className}`}>
+      <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+    </div>
+  )
+}
+
+function taskTone(it: QueueItem): 'run' | 'ok' | 'err' | 'wait' {
+  if (it.state === 'done') return 'ok'
+  if (it.state === 'err') return 'err'
+  if (it.state === 'queued' || it.state === 'paused') return 'wait'
+  return 'run'
+}
+
+function taskLabel(it: QueueItem) {
+  if (it.state === 'done') return '已完成'
+  if (it.state === 'err') return '失败'
+  if (it.state === 'paused') return '已暂停'
+  if (it.state === 'queued') return '排队'
+  return '上传中'
+}
+
+function TaskIcon({ name }: { name: string }) {
+  const t = fileTypeOf(name)
+  const icon = t === 'image' ? <ImageIcon className="size-4" /> : t === 'video' ? <Film className="size-4" /> : <FileIcon className="size-4" />
+  return <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">{icon}</div>
+}
+
+function TaskActions({ item: it }: { item: QueueItem }) {
+  if (it.state === 'uploading') {
+    return (
+      <>
+        <Button size="icon-sm" variant="outline" aria-label="暂停" onClick={() => pauseItem(it)}><Pause /></Button>
+        <Button size="icon-sm" variant="ghost" aria-label="取消" onClick={() => void cancelItem(it)}><X /></Button>
+      </>
+    )
+  }
+  if (it.state === 'paused') {
+    return (
+      <>
+        <Button size="icon-sm" aria-label="继续" onClick={() => resumeItem(it)}><Play /></Button>
+        <Button size="icon-sm" variant="ghost" aria-label="取消" onClick={() => void cancelItem(it)}><X /></Button>
+      </>
+    )
+  }
+  if (it.state === 'queued') return <Button size="icon-sm" variant="ghost" aria-label="取消" onClick={() => void cancelItem(it)}><X /></Button>
+  return <Button size="icon-sm" variant="ghost" aria-label="移除" onClick={() => void cancelItem(it)}><Trash2 /></Button>
+}
+
+function TaskRow({ item: it, compact = false }: { item: QueueItem; compact?: boolean }) {
+  const tone = taskTone(it)
+  const badgeClass = tone === 'ok' ? 'border-transparent bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : tone === 'err' ? '' : ''
+  return (
+    <div className={`flex items-center gap-3 ${compact ? 'rounded-lg bg-muted/40 p-2.5' : 'border-b px-4 py-3 last:border-b-0'}`}>
+      {compact ? null : <TaskIcon name={it.file.name} />}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <div className="min-w-0 truncate text-sm font-medium">{it.file.name}</div>
+          <Badge variant={tone === 'err' ? 'destructive' : 'secondary'} className={`shrink-0 ${badgeClass}`}>{taskLabel(it)}</Badge>
+        </div>
+        <div className="mt-0.5 truncate text-xs text-muted-foreground">{it.text}</div>
+        <ThinBar value={it.pct} tone={tone} className="mt-2" />
       </div>
+      <div className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">{Math.round(it.pct)}%</div>
+      <div className="flex shrink-0 gap-1"><TaskActions item={it} /></div>
     </div>
   )
 }
@@ -771,10 +845,10 @@ function Transfer({ items, summary, folded, setFolded }: { items: QueueItem[]; s
         <span className="font-medium">{summary.title}</span>
         <span className="text-xs text-muted-foreground">{folded ? '展开' : '收起'}</span>
       </button>
-      <Progress value={summary.agg} className="h-0.5 rounded-none" />
+      <ThinBar value={summary.agg} tone={summary.active ? 'run' : summary.fail ? 'err' : 'ok'} />
       {!folded ? (
         <div className="max-h-80 space-y-2 overflow-auto p-2">
-          {items.map((it) => <TaskRow key={it.id} item={it} />)}
+          {items.map((it) => <TaskRow key={it.id} item={it} compact />)}
           {!summary.active ? <Button size="sm" variant="ghost" onClick={clearFinished}>清空已结束</Button> : null}
         </div>
       ) : null}
