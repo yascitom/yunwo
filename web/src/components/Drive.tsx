@@ -561,6 +561,27 @@ function FileView(props: {
   )
 }
 
+function frameSrc(url: string) {
+  return url.includes('#') ? url : `${url}#t=0.1`
+}
+
+function VideoFrame({ url, className }: { url: string; className: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return <div className={`grid place-items-center bg-muted ${className}`}><Film className="size-4 text-muted-foreground" /></div>
+  }
+  return (
+    <video
+      muted
+      playsInline
+      preload="metadata"
+      src={frameSrc(url)}
+      className={`pointer-events-none bg-black ${className}`}
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
 function Thumb({ file, mode = 'cell' }: { file: CloudFile; mode?: 'cell' | 'cover' | 'natural' }) {
   const t = file.type || fileTypeOf(file.key)
   const ext = (file.key.split('.').pop() || 'file').slice(0, 4).toUpperCase()
@@ -573,8 +594,14 @@ function Thumb({ file, mode = 'cell' }: { file: CloudFile; mode?: 'cell' | 'cove
       </div>
     )
   }
+  if (t === 'video') {
+    if (mode === 'cell') {
+      return <div className="size-9 overflow-hidden rounded-md bg-black"><VideoFrame url={file.url} className="size-9 object-cover" /></div>
+    }
+    if (mode === 'natural') return <VideoFrame url={file.url} className="aspect-video max-h-[420px] w-full object-cover" />
+    return <VideoFrame url={file.url} className="h-full w-full object-cover" />
+  }
   const box = mode === 'cell' ? 'grid size-9 place-items-center overflow-hidden rounded-md bg-muted' : mode === 'natural' ? 'grid aspect-[4/3] w-full place-items-center bg-muted' : 'grid h-full w-full place-items-center bg-muted'
-  if (t === 'video') return <div className={box}><Film className="size-4 text-muted-foreground" /></div>
   return <div className={`${box} text-[10px] font-medium text-muted-foreground`}>{ext}</div>
 }
 
@@ -601,7 +628,7 @@ function InspectorBody({ file, fmt, onFmt, onOpen, onDown, onQr, onRename, onDel
   return (
     <div className="space-y-4 px-4 pb-6">
       <div className="grid h-40 place-items-center overflow-hidden rounded-xl bg-muted">
-        {t === 'image' ? <img src={file.url} alt="" className="max-h-40 w-full object-contain" /> : <span className="text-sm text-muted-foreground">{t === 'video' ? '视频' : '文件'}</span>}
+        {t === 'image' ? <img src={file.url} alt="" className="max-h-40 w-full object-contain" /> : t === 'video' ? <VideoFrame url={file.url} className="max-h-40 w-full object-contain" /> : <span className="text-sm text-muted-foreground">文件</span>}
       </div>
       <div className="text-sm leading-snug font-medium break-all">{fileNameOf(file.key)}</div>
       <dl className="text-xs">
@@ -659,7 +686,7 @@ function Recent() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(148px,1fr))] gap-3">
           {items.map((it) => (
             <button key={it.url + it.t} type="button" className="overflow-hidden rounded-xl border bg-card text-left transition-colors duration-150 hover:border-foreground/20" onClick={() => navigator.clipboard.writeText(formatLink({ key: it.url, url: it.url, type: fileTypeOf(it.url) }, fmt)).then(() => toast.success('已复制'))}>
-              {fileTypeOf(it.url) === 'image' ? <img src={it.url} alt="" className="aspect-square w-full object-cover" /> : <div className="grid aspect-square place-items-center bg-muted text-xs text-muted-foreground">文件</div>}
+              {fileTypeOf(it.url) === 'image' ? <img src={it.url} alt="" className="aspect-square w-full object-cover" /> : fileTypeOf(it.url) === 'video' ? <VideoFrame url={it.url} className="aspect-square w-full object-cover" /> : <div className="grid aspect-square place-items-center bg-muted text-xs text-muted-foreground">文件</div>}
               <div className="truncate px-2 py-1.5 text-xs">{fileNameOf(it.url)}</div>
             </button>
           ))}
