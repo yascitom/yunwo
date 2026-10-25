@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { toast } from 'sonner'
 import { listFiles, deleteFile, renameFile, moveFile, ApiError } from '@/lib/api'
 import { addHist, clearHist, getHist, type HistItem } from '@/lib/auth'
-import { dirLabel, fileNameOf, fileTypeOf, sortFiles, validName, type CloudFile, type DirId, type LinkFmt, type SortMode, type ViewMode } from '@/lib/files'
+import { dirLabel, fileNameOf, fileTypeOf, filterFiles, sortFiles, validName, type CloudFile, type DirId, type LinkFmt, type SortMode, type ViewMode } from '@/lib/files'
 import { setMaxSizeMB } from '@/lib/upload'
 
 const VIEW_KEY = 'yunwo_view'
@@ -224,7 +224,27 @@ export const useDrive = create<State>((set, get) => ({
 }))
 
 export function visibleFiles(s: Pick<State, 'files' | 'query' | 'sort'>) {
-  const kw = s.query.trim().toLowerCase()
-  const base = kw ? s.files.filter((f) => f.key.toLowerCase().includes(kw)) : s.files
-  return sortFiles(base, s.sort)
+  return filterFiles(sortFiles(s.files, s.sort), s.query)
+}
+
+let pickedFrom: string[] | null = null
+let pickedSet = new Set<string>()
+
+export function isPicked(selected: string[], key: string) {
+  if (pickedFrom !== selected) {
+    pickedFrom = selected
+    pickedSet = new Set(selected)
+  }
+  return pickedSet.has(key)
+}
+
+const pickedSel = new Map<string, (s: State) => boolean>()
+
+export function pickedSelector(key: string) {
+  let fn = pickedSel.get(key)
+  if (!fn) {
+    fn = (s) => isPicked(s.selected, key)
+    pickedSel.set(key, fn)
+  }
+  return fn
 }

@@ -26,6 +26,8 @@ const items: QueueItem[] = []
 const pending: QueueItem[] = []
 const listeners = new Set<() => void>()
 let snapshot: QueueItem[] = items
+type Summary = { title: string; agg: number; done: number; fail: number; pausedN: number; active: boolean; count: number }
+let summaryCache: Summary = { title: '传输', agg: 0, done: 0, fail: 0, pausedN: 0, active: false, count: 0 }
 let askName: (name: string) => Promise<string | null> = async () => null
 let onDone: (info: DoneInfo) => void = () => {}
 
@@ -41,6 +43,7 @@ export function getQueue() { return snapshot }
 
 function emit() {
   snapshot = items.slice()
+  summaryCache = computeSummary()
   listeners.forEach((fn) => fn())
 }
 
@@ -142,23 +145,19 @@ export function clearFinished() {
 
 async function maybeCompress(file: File) {
   if (!webpOn() || !file.type.startsWith('image/') || file.type === 'image/gif' || file.type === 'image/svg+xml') return file
-  const img = new Image()
-  const url = URL.createObjectURL(file)
+  let bitmap: ImageBitmap | null = null
   try {
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve()
-      img.onerror = () => reject(new Error('decode'))
-      img.src = url
-    })
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
   } catch {
-    URL.revokeObjectURL(url)
-    return file
+    try { bitmap = await createImageBitmap(file) } catch { return file }
   }
   const c = document.createElement('canvas')
-  c.width = img.naturalWidth
-  c.height = img.naturalHeight
-  c.getContext('2d')!.drawImage(img, 0, 0)
-  URL.revokeObjectURL(url)
+  c.width = bitmap.width
+  c.height = bitmap.height
+  const ctx = c.getContext('2d', { alpha: false })
+  if (!ctx) { bitmap.close(); return file }
+  ctx.drawImage(bitmap, 0, 0)
+  bitmap.close()
   const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/webp', quality() / 100))
   if (blob && blob.size < file.size) return new File([blob], file.name.replace(/\.\w+$/, '') + '.webp', { type: 'image/webp' })
   return file
@@ -308,7 +307,11 @@ async function mpApiRetry(payload: Record<string, unknown>, tries = 3) {
   throw lastErr
 }
 
-function md5Hex(buffer: ArrayBuffer) {
+const MD5_S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
+const MD5_K = new Uint32Array(64)
+for (let i = 0; i < 64; i++) MD5_K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296)
+
+async function md5Hex(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer)
   const n = bytes.length
   const bitLen = n * 8
@@ -320,12 +323,10 @@ function md5Hex(buffer: ArrayBuffer) {
   const dv = new DataView(buf.buffer)
   dv.setUint32(total - 8, bitLen >>> 0, true)
   dv.setUint32(total - 4, Math.floor(bitLen / 4294967296), true)
-  const S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
-  const K = new Uint32Array(64)
-  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296)
   let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476
   const M = new Uint32Array(16)
   for (let off = 0; off < total; off += 64) {
+    if (off !== 0 && (off & 131071) === 0) await new Promise((r) => setTimeout(r, 0))
     for (let i = 0; i < 16; i++) M[i] = dv.getUint32(off + i * 4, true)
     let A = a0, B = b0, C = c0, D = d0
     for (let i = 0; i < 64; i++) {
@@ -335,9 +336,9 @@ function md5Hex(buffer: ArrayBuffer) {
       else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16 }
       else { F = C ^ (B | ~D); g = (7 * i) % 16 }
       const tmp = D
-      const sum = (A + F + K[i] + M[g])
+      const sum = (A + F + MD5_K[i] + M[g])
       D = C; C = B
-      const s = S[i]
+      const s = MD5_S[i]
       B = (B + (((sum << s) | (sum >>> (32 - s))))) | 0
       A = tmp
     }
@@ -387,7 +388,7 @@ function xhrPut(url: string, blob: Blob, mime: string, md5Fallback: string, onPr
 }
 
 async function uploadPartWithRetry(task: MpTask, n: number, chunk: Blob, onProgress: (n: number) => void, item: QueueItem) {
-  const md5 = md5Hex(await chunk.arrayBuffer())
+  const md5 = await md5Hex(await chunk.arrayBuffer())
   let lastErr: unknown = null
   for (let attempt = 1; attempt <= 3; attempt++) {
     if (item.paused) throw pausedErr()
@@ -537,13 +538,18 @@ async function processQueue() {
   emit()
 }
 
-export function queueSummary() {
+function computeSummary(): Summary {
   const list = items
-  const done = list.filter((i) => i.state === 'done').length
-  const fail = list.filter((i) => i.state === 'err').length
-  const pausedN = list.filter((i) => i.state === 'paused').length
+  let done = 0, fail = 0, pausedN = 0, pctSum = 0
+  for (let i = 0; i < list.length; i++) {
+    const it = list[i]
+    pctSum += it.pct || 0
+    if (it.state === 'done') done++
+    else if (it.state === 'err') fail++
+    else if (it.state === 'paused') pausedN++
+  }
   const active = uploading
-  const agg = list.length ? list.reduce((s, i) => s + (i.pct || 0), 0) / list.length : 0
+  const agg = list.length ? pctSum / list.length : 0
   let title = '传输'
   if (!list.length) title = '传输'
   else if (active) title = `上传中 ${done + fail}/${list.length}` + (pausedN ? ` · 暂停 ${pausedN}` : '')
@@ -556,4 +562,8 @@ export function queueSummary() {
     title = parts.join(' · ') || `共 ${list.length} 个`
   }
   return { title, agg, done, fail, pausedN, active, count: list.length }
+}
+
+export function queueSummary() {
+  return summaryCache
 }

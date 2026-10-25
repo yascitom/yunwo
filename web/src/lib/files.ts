@@ -65,6 +65,50 @@ export function fmtTime(t?: string) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+export type FileMeta = {
+  name: string
+  keyLower: string
+  timeMs: number
+  sizeLabel: string
+  timeLabel: string
+  type: FileKind
+  ext: string
+}
+
+const META = new WeakMap<CloudFile, FileMeta>()
+
+export function fileMeta(f: CloudFile): FileMeta {
+  const hit = META.get(f)
+  if (hit) return hit
+  const name = fileNameOf(f.key)
+  const path = f.key.split('?')[0].split('#')[0]
+  const ext = (path.split('.').pop() || '').toLowerCase()
+  const meta: FileMeta = {
+    name,
+    keyLower: f.key.toLowerCase(),
+    timeMs: f.time ? Date.parse(f.time) || 0 : 0,
+    sizeLabel: sizeText(f.size),
+    timeLabel: fmtTime(f.time),
+    type: f.type || fileTypeOf(f.key),
+    ext,
+  }
+  META.set(f, meta)
+  return meta
+}
+
+const NO_THUMB = new Set(['svg', 'ico', 'gif'])
+
+export function thumbUrl(url: string, px: number, ext: string, mode: 'fill' | 'fit' = 'fill') {
+  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return url
+  if (NO_THUMB.has(ext)) return url
+  if (url.includes('x-oss-process=')) return url
+  const side = Math.max(32, Math.round(px))
+  const proc = mode === 'fill'
+    ? `image/resize,m_fill,w_${side},h_${side}/quality,q_65`
+    : `image/resize,m_lfit,w_${side}/quality,q_72`
+  return `${url}${url.includes('?') ? '&' : '?'}x-oss-process=${proc}`
+}
+
 export function formatLink(f: { key: string; url: string; type?: FileKind }, fmt: LinkFmt) {
   const name = fileNameOf(f.key)
   const t = f.type || fileTypeOf(f.key)
@@ -78,16 +122,47 @@ export function formatLink(f: { key: string; url: string; type?: FileKind }, fmt
   return f.url
 }
 
+const nameCollator = new Intl.Collator('zh')
+
+function byTimeDesc(a: CloudFile, b: CloudFile) {
+  return fileMeta(b).timeMs - fileMeta(a).timeMs
+}
+function byTimeAsc(a: CloudFile, b: CloudFile) {
+  return fileMeta(a).timeMs - fileMeta(b).timeMs
+}
+function bySizeDesc(a: CloudFile, b: CloudFile) {
+  return (b.size || 0) - (a.size || 0)
+}
+function bySizeAsc(a: CloudFile, b: CloudFile) {
+  return (a.size || 0) - (b.size || 0)
+}
+function byNameAsc(a: CloudFile, b: CloudFile) {
+  return nameCollator.compare(fileMeta(a).name, fileMeta(b).name)
+}
+function byNameDesc(a: CloudFile, b: CloudFile) {
+  return nameCollator.compare(fileMeta(b).name, fileMeta(a).name)
+}
+
+const SORT_CMP: Record<SortMode, (a: CloudFile, b: CloudFile) => number> = {
+  time_desc: byTimeDesc,
+  time_asc: byTimeAsc,
+  size_desc: bySizeDesc,
+  size_asc: bySizeAsc,
+  name_asc: byNameAsc,
+  name_desc: byNameDesc,
+}
+
 export function sortFiles(items: CloudFile[], sort: SortMode) {
-  const arr = [...items]
-  const name = (f: CloudFile) => fileNameOf(f.key)
-  if (sort === 'time_asc') arr.sort((a, b) => +new Date(a.time || 0) - +new Date(b.time || 0))
-  else if (sort === 'size_desc') arr.sort((a, b) => (b.size || 0) - (a.size || 0))
-  else if (sort === 'size_asc') arr.sort((a, b) => (a.size || 0) - (b.size || 0))
-  else if (sort === 'name_asc') arr.sort((a, b) => name(a).localeCompare(name(b), 'zh'))
-  else if (sort === 'name_desc') arr.sort((a, b) => name(b).localeCompare(name(a), 'zh'))
-  else arr.sort((a, b) => +new Date(b.time || 0) - +new Date(a.time || 0))
+  if (items.length < 2) return items
+  const arr = items.slice()
+  arr.sort(SORT_CMP[sort])
   return arr
+}
+
+export function filterFiles(items: CloudFile[], query: string) {
+  const kw = query.trim().toLowerCase()
+  if (!kw) return items
+  return items.filter((f) => fileMeta(f).keyLower.includes(kw))
 }
 
 const NAME_RE = /^[A-Za-z0-9._\-一-鿿㐀-䶿가-힯ㄱ-ㅣ぀-ヿ]+$/
